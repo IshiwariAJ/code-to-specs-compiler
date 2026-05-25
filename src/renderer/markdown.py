@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from src.ir.types import (
     CaseNode,
+    ClassFieldSpec,
+    ClassSpec,
     ConditionBlock,
     DataTransformation,
     FunctionSpec,
@@ -199,9 +201,14 @@ def _render_module_variables_section(vars_: tuple[ModuleVariableSpec, ...]) -> s
 
 
 def _render_type_definition_row(spec: TypeDefinitionSpec) -> str:
-    """TypeDefinitionSpec をテーブル行に変換する。"""
+    """TypeDefinitionSpec をテーブル行に変換する。
+
+    Markdown テーブルのセル内で | はカラム区切りと誤解されるため \\| にエスケープする。
+    TypeScript のユニオン型（"A" | "B" | "C"）で必須の処理。
+    """
     kind_label = "type エイリアス" if spec.definition_kind == "alias" else "interface"
-    return f"| `{spec.name}` | {kind_label} | `{spec.type_text}` |"
+    safe_type_text = spec.type_text.replace("|", r"\|")
+    return f"| `{spec.name}` | {kind_label} | `{safe_type_text}` |"
 
 
 def _render_type_definitions_section(defs: tuple[TypeDefinitionSpec, ...]) -> str:
@@ -214,6 +221,52 @@ def _render_type_definitions_section(defs: tuple[TypeDefinitionSpec, ...]) -> st
     ]
     for spec in defs:
         lines.append(_render_type_definition_row(spec))
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# レンダリング: クラス定義（Python @dataclass 等）
+# ---------------------------------------------------------------------------
+
+
+def _render_class_field_row(field: ClassFieldSpec) -> str:
+    """ClassFieldSpec をテーブル行（Markdown）に変換する。"""
+    type_col = f"`{field.type_text}`" if field.type_text else "—"
+    default_col = f"`{field.default_text}`" if field.default_text else "—"
+    comment_col = field.comment if field.comment else "—"
+    return f"| `{field.name}` | {type_col} | {default_col} | {comment_col} |"
+
+
+def _render_class_spec(spec: ClassSpec) -> str:
+    """ClassSpec を Markdown サブセクションに変換する。"""
+    kind_label = "dataclass" if spec.is_dataclass else "class"
+    lines = [f"### 🏛️ `{spec.name}` ({kind_label})", ""]
+
+    if spec.description:
+        comment_block = _render_comment_blockquote(spec.description)
+        if comment_block:
+            lines.append(comment_block)
+            lines.append("")
+
+    if spec.fields:
+        lines.extend([
+            "| フィールド名 | 型 | デフォルト値 | 説明 |",
+            "|---|---|---|---|",
+        ])
+        for field in spec.fields:
+            lines.append(_render_class_field_row(field))
+    else:
+        lines.append("*（フィールド定義が検出されませんでした）*")
+
+    return "\n".join(lines)
+
+
+def _render_class_definitions_section(classes: tuple[ClassSpec, ...]) -> str:
+    """クラス定義一覧を Markdown セクションに変換する。"""
+    lines = ["## 🏛️ クラス定義", ""]
+    for spec in classes:
+        lines.append(_render_class_spec(spec))
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -475,6 +528,13 @@ def render_module_spec(spec: ModuleSpec) -> str:
     # 型定義セクション（TypeScript のみ）
     if spec.type_definitions:
         sections.append(_render_type_definitions_section(spec.type_definitions))
+        sections.append("")
+        sections.append("---")
+        sections.append("")
+
+    # クラス定義セクション（Python @dataclass 等）
+    if spec.class_definitions:
+        sections.append(_render_class_definitions_section(spec.class_definitions))
         sections.append("")
         sections.append("---")
         sections.append("")

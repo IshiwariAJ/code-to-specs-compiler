@@ -8,6 +8,8 @@ renderer/markdown.py のユニットテスト
 """
 from src.ir.types import (
     CaseNode,
+    ClassFieldSpec,
+    ClassSpec,
     ConditionBlock,
     DataTransformation,
     FunctionSpec,
@@ -429,6 +431,41 @@ class TestRenderTypeDefinitionSpec:
         output = _render_with_type_defs(d)
         assert "ACTIVE" in output
 
+    def test_union_type_pipe_is_escaped_for_markdown_table(self):
+        """
+        ユニオン型の | は Markdown テーブルのカラム区切りと衝突するため \\| にエスケープされること。
+        例: "ACTIVE" | "INACTIVE" | "BANNED" → "ACTIVE" \\| "INACTIVE" \\| "BANNED"
+        """
+        d = TypeDefinitionSpec(
+            kind="TypeDefinitionSpec",
+            name="UserStatus",
+            definition_kind="alias",
+            type_text='"ACTIVE" | "INACTIVE" | "BANNED"',
+        )
+        output = _render_with_type_defs(d)
+        # すべての値が出力に含まれること
+        assert "ACTIVE" in output
+        assert "INACTIVE" in output
+        assert "BANNED" in output
+        # | がエスケープされていること（生の | だけの行は存在しない）
+        assert r"\|" in output
+
+    def test_interface_long_body_not_truncated(self):
+        """
+        インターフェースのボディが長くても省略記号（...）なしで全文が出力されること。
+        例: purchaseHistory: { price: number }[] が切り捨てられないことを保証する。
+        """
+        d = TypeDefinitionSpec(
+            kind="TypeDefinitionSpec",
+            name="User",
+            definition_kind="interface",
+            type_text="{ status: UserStatus; rank: string; purchaseHistory: { price: number }[]; }",
+        )
+        output = _render_with_type_defs(d)
+        assert "purchaseHistory" in output
+        assert "{ price: number }[]" in output
+        assert "..." not in output
+
     def test_no_type_defs_hides_section(self):
         spec = ModuleSpec(name="Test", functions=())
         output = render_module_spec(spec)
@@ -645,3 +682,110 @@ class TestRenderModuleWithFileComment:
         lines = output.splitlines()
         blockquote_lines = [l for l in lines if l.startswith("> ")]
         assert blockquote_lines == []
+
+
+# ---------------------------------------------------------------------------
+# クラス定義レンダリングのテスト
+# ---------------------------------------------------------------------------
+
+
+def _make_class_module(*classes: ClassSpec) -> ModuleSpec:
+    """ClassSpec を含む最小 ModuleSpec を作成するヘルパー。"""
+    return ModuleSpec(name="TestModule", functions=(), class_definitions=classes)
+
+
+class TestRenderClassDefinitions:
+    """ClassSpec → Markdown 変換の網羅的なテスト。"""
+
+    def test_class_definitions_section_heading(self):
+        cls = ClassSpec(kind="ClassSpec", name="Config", is_dataclass=True)
+        output = render_module_spec(_make_class_module(cls))
+        assert "## 🏛️ クラス定義" in output
+
+    def test_dataclass_label_shown(self):
+        cls = ClassSpec(kind="ClassSpec", name="Config", is_dataclass=True)
+        output = render_module_spec(_make_class_module(cls))
+        assert "`Config` (dataclass)" in output
+
+    def test_plain_class_label_shown(self):
+        cls = ClassSpec(kind="ClassSpec", name="MyClass", is_dataclass=False)
+        output = render_module_spec(_make_class_module(cls))
+        assert "`MyClass` (class)" in output
+
+    def test_class_docstring_shown_as_blockquote(self):
+        cls = ClassSpec(
+            kind="ClassSpec",
+            name="Config",
+            is_dataclass=True,
+            description='"""設定値を保持する。"""',
+        )
+        output = render_module_spec(_make_class_module(cls))
+        assert "> 設定値を保持する。" in output
+
+    def test_field_name_and_type_in_table(self):
+        field = ClassFieldSpec(name="host", type_text="str")
+        cls = ClassSpec(kind="ClassSpec", name="Config", is_dataclass=True, fields=(field,))
+        output = render_module_spec(_make_class_module(cls))
+        assert "`host`" in output
+        assert "`str`" in output
+
+    def test_field_default_value_shown(self):
+        field = ClassFieldSpec(name="port", type_text="int", default_text="8080")
+        cls = ClassSpec(kind="ClassSpec", name="Config", is_dataclass=True, fields=(field,))
+        output = render_module_spec(_make_class_module(cls))
+        assert "`8080`" in output
+
+    def test_field_no_default_shows_dash(self):
+        field = ClassFieldSpec(name="host", type_text="str", default_text="")
+        cls = ClassSpec(kind="ClassSpec", name="Config", is_dataclass=True, fields=(field,))
+        output = render_module_spec(_make_class_module(cls))
+        # デフォルトなし → "—" が表示される
+        assert "| — |" in output
+
+    def test_field_inline_comment_shown(self):
+        field = ClassFieldSpec(name="host", type_text="str", comment="サーバーホスト名")
+        cls = ClassSpec(kind="ClassSpec", name="Config", is_dataclass=True, fields=(field,))
+        output = render_module_spec(_make_class_module(cls))
+        assert "サーバーホスト名" in output
+
+    def test_field_no_comment_shows_dash(self):
+        field = ClassFieldSpec(name="host", type_text="str", comment="")
+        cls = ClassSpec(kind="ClassSpec", name="Config", is_dataclass=True, fields=(field,))
+        output = render_module_spec(_make_class_module(cls))
+        # コメントなし → "—" が表示される
+        # テーブルヘッダー行の "説明" 列直下に "—" がある
+        assert "| — |" in output
+
+    def test_no_fields_shows_placeholder(self):
+        cls = ClassSpec(kind="ClassSpec", name="EmptyClass", is_dataclass=True, fields=())
+        output = render_module_spec(_make_class_module(cls))
+        assert "フィールド定義が検出されませんでした" in output
+
+    def test_class_section_appears_before_function_section(self):
+        field = ClassFieldSpec(name="x", type_text="int")
+        cls = ClassSpec(kind="ClassSpec", name="Config", is_dataclass=True, fields=(field,))
+        func = FunctionSpec(name="myFunc", body=())
+        spec = ModuleSpec(name="TestModule", functions=(func,), class_definitions=(cls,))
+        output = render_module_spec(spec)
+        class_pos = output.index("🏛️ クラス定義")
+        func_pos = output.index("🔧 関数: `myFunc`")
+        assert class_pos < func_pos
+
+    def test_multiple_classes_rendered(self):
+        cls_a = ClassSpec(kind="ClassSpec", name="A", is_dataclass=True)
+        cls_b = ClassSpec(kind="ClassSpec", name="B", is_dataclass=False)
+        output = render_module_spec(_make_class_module(cls_a, cls_b))
+        assert "`A` (dataclass)" in output
+        assert "`B` (class)" in output
+
+    def test_table_header_row_present(self):
+        field = ClassFieldSpec(name="x", type_text="int")
+        cls = ClassSpec(kind="ClassSpec", name="Config", is_dataclass=True, fields=(field,))
+        output = render_module_spec(_make_class_module(cls))
+        assert "| フィールド名 | 型 | デフォルト値 | 説明 |" in output
+
+    def test_class_not_rendered_when_empty_tuple(self):
+        """class_definitions=() の場合はクラスセクション自体が出力されない。"""
+        spec = ModuleSpec(name="Test", functions=())
+        output = render_module_spec(spec)
+        assert "🏛️ クラス定義" not in output

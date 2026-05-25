@@ -66,6 +66,43 @@ class TypeDefinitionSpec:
     type_text: str  # 型本体のテキスト（長い場合は省略）
 
 
+@dataclass(frozen=True)
+class ClassFieldSpec:
+    """
+    クラスの1フィールド仕様（Python @dataclass 等）。
+
+    例:
+        name: str            → name="name", type_text="str"
+        value: int = 0       → name="value", type_text="int", default_text="0"
+        count: int = 0  # 説明 → comment="説明"
+    """
+    name: str
+    type_text: str        # 型アノテーションのテキスト（例: "str", "frozenset[str]"）
+    default_text: str = ""  # デフォルト値テキスト（なければ空文字）
+    comment: str = ""     # インラインコメント（# 以降のテキスト）
+
+
+@dataclass(frozen=True)
+class ClassSpec:
+    """
+    クラス定義の仕様（Python @dataclass 等）。
+
+    TypeScript の TypeDefinitionSpec が type/interface の文字列表現を保持するのに対し、
+    ClassSpec はフィールド構造を個別に保持する。
+
+    例:
+        @dataclass(frozen=True)
+        class LanguageProfile:
+            \"\"\"...\"\"\"\
+            name: str  # 説明
+    """
+    kind: Literal["ClassSpec"]
+    name: str
+    is_dataclass: bool     # @dataclass デコレータを持つか
+    description: str = ""  # クラス docstring
+    fields: tuple[ClassFieldSpec, ...] = ()
+
+
 # ---------------------------------------------------------------------------
 # 関数本体の IR ノード（制御フロー・データ変換）
 # ---------------------------------------------------------------------------
@@ -173,14 +210,16 @@ class ModuleSpec:
     1つのソースファイル全体の仕様。
 
     フィールド順: モジュール定義の上から下の流れに対応する。
-      imports          → ファイル冒頭のインポート文
-      module_variables → モジュールレベルの定数・変数
-      type_definitions → 型エイリアス・インターフェース（主に TypeScript）
-      functions        → 関数定義
+      imports           → ファイル冒頭のインポート文
+      module_variables  → モジュールレベルの定数・変数
+      type_definitions  → 型エイリアス・インターフェース（主に TypeScript）
+      class_definitions → クラス定義（主に Python @dataclass）
+      functions         → 関数定義
     """
     name: str
     functions: tuple[FunctionSpec, ...]
     imports: tuple[ImportSpec, ...] = ()
     module_variables: tuple[ModuleVariableSpec, ...] = ()
     type_definitions: tuple[TypeDefinitionSpec, ...] = ()
+    class_definitions: tuple[ClassSpec, ...] = ()
     file_comment: str = ""  # ファイル先頭のコメント / モジュール docstring

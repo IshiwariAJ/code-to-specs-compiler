@@ -9,8 +9,8 @@ mapper.py のユニットテスト
 import pytest
 
 from src.ir.mapper import map_source_to_module_spec
-from src.ir.profiles import GO_PROFILE, PYTHON_PROFILE, TYPESCRIPT_PROFILE
 from src.ir.types import (
+    ClassSpec,
     ConditionBlock,
     DataTransformation,
     FunctionSpec,
@@ -22,9 +22,9 @@ from src.ir.types import (
     SideEffect,
     TypeDefinitionSpec,
 )
-from src.parser.go_parser import parse_go_source
-from src.parser.python_parser import parse_python_source
-from src.parser.ts_parser import parse_typescript_source
+from src.languages.go import PLUGIN as GO_PLUGIN
+from src.languages.python import PLUGIN as PYTHON_PLUGIN
+from src.languages.typescript import PLUGIN as TYPESCRIPT_PLUGIN
 
 
 # ---------------------------------------------------------------------------
@@ -34,20 +34,20 @@ from src.parser.ts_parser import parse_typescript_source
 
 def _ts_module(source: str) -> ModuleSpec:
     """TypeScript スニペットを解析して ModuleSpec を返す純粋ヘルパー。"""
-    root = parse_typescript_source(source)
-    return map_source_to_module_spec(root, "test", TYPESCRIPT_PROFILE)
+    root = TYPESCRIPT_PLUGIN.parse_source(source)
+    return map_source_to_module_spec(root, "test", TYPESCRIPT_PLUGIN)
 
 
 def _py_module(source: str) -> ModuleSpec:
     """Python スニペットを解析して ModuleSpec を返す純粋ヘルパー。"""
-    root = parse_python_source(source)
-    return map_source_to_module_spec(root, "test", PYTHON_PROFILE)
+    root = PYTHON_PLUGIN.parse_source(source)
+    return map_source_to_module_spec(root, "test", PYTHON_PLUGIN)
 
 
 def _go_module(source: str) -> ModuleSpec:
     """Go スニペットを解析して ModuleSpec を返す純粋ヘルパー。"""
-    root = parse_go_source(source)
-    return map_source_to_module_spec(root, "test", GO_PROFILE)
+    root = GO_PLUGIN.parse_source(source)
+    return map_source_to_module_spec(root, "test", GO_PLUGIN)
 
 
 def _ts_body(source: str) -> tuple:
@@ -67,8 +67,8 @@ def _py_body(source: str) -> tuple:
 
 class TestModuleSpec:
     def test_module_name_is_preserved(self):
-        root = parse_typescript_source("function f() {}")
-        spec = map_source_to_module_spec(root, "my_module", TYPESCRIPT_PROFILE)
+        root = TYPESCRIPT_PLUGIN.parse_source("function f() {}")
+        spec = map_source_to_module_spec(root, "my_module", TYPESCRIPT_PLUGIN)
         assert spec.name == "my_module"
 
     def test_empty_typescript_function_has_no_body_nodes(self):
@@ -673,11 +673,11 @@ class TestCommentExtraction:
         body = _ts_body(src)
         assert body[0].comment == ""
 
-    def test_py_inline_comment_not_extracted(self):
+    def test_py_guard_clause_leading_comment_extracted(self):
         """
-        Python の tree-sitter では関数本体 block の comment ノードが
-        extra として扱われ named_children に含まれないため、
-        インラインコメントは抽出されない（仕様）。
+        Python の関数ブロック先頭コメントは tree-sitter が
+        function_definition の直下（: と block の間）に配置するが、
+        フォールバック処理により GuardClause の comment フィールドに正しく取り込まれる。
         """
         src = (
             "def f(x):\n"
@@ -688,8 +688,7 @@ class TestCommentExtraction:
         body = _py_body(src)
         guard = body[0]
         assert isinstance(guard, GuardClause)
-        # Python の関数内インラインコメントは非対応（tree-sitter 制約）
-        assert guard.comment == ""
+        assert "前提条件チェック" in guard.comment
 
 
 # ---------------------------------------------------------------------------
@@ -1118,3 +1117,161 @@ class TestGoFunctionSpec:
         )
         spec = _go_module(src)
         assert "サンプルです" in spec.file_comment
+
+
+# ---------------------------------------------------------------------------
+# Python クラス定義（@dataclass / class）の抽出テスト
+# ---------------------------------------------------------------------------
+
+
+class TestPyClassDefinition:
+    """Python の @dataclass / class 定義が ClassSpec に正しく変換されることを検証する。"""
+
+    def test_dataclass_detected_as_is_dataclass_true(self):
+        src = (
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Config:\n"
+            "    host: str\n"
+        )
+        spec = _py_module(src)
+        assert len(spec.class_definitions) == 1
+        assert spec.class_definitions[0].is_dataclass is True
+
+    def test_plain_class_detected_as_is_dataclass_false(self):
+        src = (
+            "class MyClass:\n"
+            "    x: int\n"
+        )
+        spec = _py_module(src)
+        assert len(spec.class_definitions) == 1
+        assert spec.class_definitions[0].is_dataclass is False
+
+    def test_class_name_extracted(self):
+        src = (
+            "@dataclass(frozen=True)\n"
+            "class LanguageProfile:\n"
+            "    name: str\n"
+        )
+        spec = _py_module(src)
+        assert spec.class_definitions[0].name == "LanguageProfile"
+
+    def test_field_name_and_type_extracted(self):
+        src = (
+            "@dataclass\n"
+            "class Point:\n"
+            "    x: int\n"
+            "    y: float\n"
+        )
+        spec = _py_module(src)
+        cls = spec.class_definitions[0]
+        assert len(cls.fields) == 2
+        assert cls.fields[0].name == "x"
+        assert cls.fields[0].type_text == "int"
+        assert cls.fields[1].name == "y"
+        assert cls.fields[1].type_text == "float"
+
+    def test_field_with_default_value_extracted(self):
+        src = (
+            "@dataclass\n"
+            "class Config:\n"
+            "    host: str\n"
+            "    port: int = 8080\n"
+        )
+        spec = _py_module(src)
+        fields = spec.class_definitions[0].fields
+        assert fields[0].default_text == ""     # host: デフォルトなし
+        assert fields[1].default_text == "8080"  # port: デフォルト 8080
+
+    def test_field_inline_comment_extracted(self):
+        src = (
+            "@dataclass\n"
+            "class Config:\n"
+            "    host: str  # サーバーホスト名\n"
+        )
+        spec = _py_module(src)
+        assert "サーバーホスト名" in spec.class_definitions[0].fields[0].comment
+
+    def test_field_preceding_block_comment_ignored(self):
+        """フィールドの前の行コメントはインラインコメントとして拾わない。"""
+        src = (
+            "@dataclass\n"
+            "class Config:\n"
+            "    # これは次のフィールドの説明\n"
+            "    host: str\n"
+        )
+        spec = _py_module(src)
+        # フィールドは抽出される（コメントは空）
+        assert spec.class_definitions[0].fields[0].name == "host"
+        assert spec.class_definitions[0].fields[0].comment == ""
+
+    def test_class_docstring_extracted(self):
+        src = (
+            "@dataclass\n"
+            "class Config:\n"
+            '    """設定値を保持する。"""\n'
+            "    host: str\n"
+        )
+        spec = _py_module(src)
+        assert "設定値を保持する" in spec.class_definitions[0].description
+
+    def test_multiple_classes_all_extracted(self):
+        src = (
+            "@dataclass\n"
+            "class A:\n"
+            "    x: int\n"
+            "@dataclass\n"
+            "class B:\n"
+            "    y: str\n"
+        )
+        spec = _py_module(src)
+        assert len(spec.class_definitions) == 2
+        names = [c.name for c in spec.class_definitions]
+        assert "A" in names
+        assert "B" in names
+
+    def test_decorated_function_not_treated_as_class(self):
+        """デコレータ付き関数は class_definitions に含まれない。"""
+        src = (
+            "def my_decorator(f): return f\n"
+            "@my_decorator\n"
+            "def my_func(): pass\n"
+        )
+        spec = _py_module(src)
+        assert len(spec.class_definitions) == 0
+
+    def test_class_and_function_coexist(self):
+        """クラス定義と関数定義が共存する場合も正しく分離される。"""
+        src = (
+            "@dataclass\n"
+            "class Config:\n"
+            "    host: str\n"
+            "def do_work(): pass\n"
+        )
+        spec = _py_module(src)
+        assert len(spec.class_definitions) == 1
+        assert len(spec.functions) == 1
+        assert spec.class_definitions[0].name == "Config"
+        assert spec.functions[0].name == "do_work"
+
+    def test_typescript_has_no_class_definitions(self):
+        """TypeScript ソースでは class_definitions が空になる。"""
+        src = "function f(): void {}\n"
+        spec = _ts_module(src)
+        assert spec.class_definitions == ()
+
+    def test_go_has_no_class_definitions(self):
+        """Go ソースでは class_definitions が空になる（Go にクラスは存在しない）。"""
+        src = "package main\nfunc f() {}\n"
+        spec = _go_module(src)
+        assert spec.class_definitions == ()
+
+    def test_generic_type_annotation_extracted(self):
+        """frozenset[str] のようなジェネリック型も正しく抽出される。"""
+        src = (
+            "@dataclass\n"
+            "class Profile:\n"
+            "    tags: frozenset[str]\n"
+        )
+        spec = _py_module(src)
+        assert "frozenset[str]" in spec.class_definitions[0].fields[0].type_text

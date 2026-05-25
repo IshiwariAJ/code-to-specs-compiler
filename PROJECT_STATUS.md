@@ -1,6 +1,6 @@
 # 自然言語コンパイラ — プロジェクト進捗管理
 
-最終更新: 2026-05-25（Phase 5A 完了: Go 対応）
+最終更新: 2026-05-25（Python @dataclass / class 対応 完了: クラス定義がMarkdown仕様書に出力）
 
 ---
 
@@ -14,6 +14,9 @@ Phase 3  ██████████ 完了     テスト整備: 138件（tes
 Phase 4  ██████████ 完了     プロジェクト一括コンパイル（ディレクトリ再帰処理）
 Phase 4+ ██████████ 完了     コメント抽出（JSDoc/docstring/インライン）+ __future__ 対応 + OSS公開（Apache 2.0）
 Phase 5A ██████████ 完了     Go 対応（for range / C スタイル for / := / assignment_statement）
+Phase R1 ██████████ 完了     リファクタリング: LanguageProfile 構造フラグ化（profile.name ハードコード撤廃）
+Phase R2 ██████████ 完了     リファクタリング: 言語プラグインシステム（新言語 = 1ファイル追加）
+Phase R3 ██████████ 完了     Python クラス定義対応（@dataclass / class → クラス定義セクション）
 Phase 5B ░░░░░░░░░░ 未着手   Java 対応
 ```
 
@@ -97,7 +100,7 @@ Phase 5B ░░░░░░░░░░ 未着手   Java 対応
 
 | 新規/変更ファイル | 内容 |
 |---|---|
-| `src/ir/profiles.py` ✨新規 | `LanguageProfile` frozen dataclass + `TYPESCRIPT_PROFILE` / `PYTHON_PROFILE` 定数 |
+| `src/ir/profiles.py` ✨新規 | `LanguageProfile` frozen dataclass 定義（定数は後の R2 で各言語ファイルへ移動）|
 | `src/ir/mapper.py` 変更 | `LanguageProfile` を受け取るよう全関数をリファクタリング。言語差異を Profile に集約 |
 | `src/parser/python_parser.py` ✨新規 | `parse_python_source(source_code: str) -> Node` （ts_parser と同一インターフェース）|
 | `src/pipeline.py` 変更 | `_LANGUAGE_CONFIGS` 辞書で拡張子 → (パーサー, Profile) を管理。新言語追加は1行追加のみ |
@@ -133,14 +136,15 @@ Phase 5B ░░░░░░░░░░ 未着手   Java 対応
 
 ```
 tests/
-├── test_mapper.py    ← 39件: map_source_to_module_spec() 経由で全 IR 型を検証
-├── test_renderer.py  ← 30件: 手動 IR 構築でレンダラーを検証
-├── test_pipeline.py  ← 32件: compile_to_spec() の E2E テスト
-└── test_batch.py     ← 37件: バッチコンパイル機能の検証（Phase 4 と同時追加）
+├── test_mapper.py    ← 当初 39件 → 現在 ~160件: map_source_to_module_spec() 経由で全 IR 型を検証
+├── test_renderer.py  ← 当初 30件 → 現在 ~90件:  手動 IR 構築でレンダラーを検証
+├── test_pipeline.py  ← 当初 32件 → 現在 ~60件:  compile_to_spec() の E2E テスト
+└── test_batch.py     ← 37件（Phase 4 以降変化なし）: バッチコンパイル機能の検証
 ```
 
 テストフレームワーク: `pytest 9.0.3`  
-合計: **138件 全グリーン**（実行時間 0.15s）
+当初: **138件 全グリーン**（実行時間 0.15s）  
+現在（Phase R3 完了時点）: **319件 全グリーン**（実行時間 0.21s）
 
 ---
 
@@ -182,21 +186,250 @@ python main.py myproject/ output_dir/
 
 ---
 
+## Phase 5A — 完了 ✅
+
+**完了日**: 2026-05-25  
+**目的**: Go 言語ファイルを解析できるようにする。
+
+### 実装済みの内容
+
+| 新規/変更ファイル | 内容 |
+|---|---|
+| `src/parser/go_parser.py` ✨新規 | `parse_go_source(source_code: str) -> Node` |
+| `src/ir/profiles.py` 変更 | `GO_PROFILE` 定数追加（後の R2 で `src/languages/go.py` に移動）|
+| `src/ir/mapper.py` 変更 | Go 用の for-range / for-clause / assignment_statement 等を追加 |
+| `src/pipeline.py` 変更 | `_LANGUAGE_CONFIGS` に `.go` エントリ追加 |
+| `examples/sample.go` ✨新規 | Go サンプルコード |
+| テスト追加 | `TestGoGuardClause` / `TestGoLoopNode` / `TestGoDataTransformation` 等（Go 用 50件超）|
+
+### Go 固有の AST 特性
+
+| 特性 | 詳細 |
+|---|---|
+| for ループ統合 | `for_statement` が range / C スタイル / 無限ループを兼ねる |
+| 直接代入文 | `assignment_statement` / `short_var_declaration`（`:=`）が `expression_statement` を介さない |
+| ブロック構造 | `block → statement_list → 文ノード` の2段構造 |
+| else if | TypeScript と同じ `nested` スタイル（Go には `elif` がない）|
+
+---
+
+## Phase 5A 後 — バグ修正 ✅
+
+**完了日**: 2026-05-25  
+**内容**: Go 対応後に発見された出力品質の不具合を修正。
+
+### 修正内容
+
+| 不具合 | 原因 | 修正箇所 |
+|---|---|---|
+| Python 関数先頭コメントが出力されない | tree-sitter-python が関数ブロック先頭コメントを `block` の外（`function_definition` 直下）に配置する | `mapper.py` `_get_preceding_comment` にフォールバック追加 |
+| TypeScript ユニオン型が途中で切れる（`"ACTIVE"` のみ表示） | `\|` が Markdown テーブルの列区切りと衝突 | `renderer.py` `_render_type_definition_row` で `\|` エスケープ |
+| interface ボディが `{...` で打ち切られる | `_truncate_text(max_len=60)` を型定義に誤用 | `mapper.py` の型定義抽出に `_normalize_whitespace` を使用 |
+| モジュール変数値が途中で切れる（`LanguageProfile(...)` が途切れる）| 同上 | `mapper.py` の変数抽出 3箇所に `_normalize_whitespace` を使用 |
+
+---
+
+## Phase R1 — 完了 ✅（リファクタリング）
+
+**完了日**: 2026-05-25  
+**目的**: `mapper.py` 内に散在していた `profile.name == "go"` 等のハードコードを撤廃し、新言語追加時の修正箇所を明確化する。
+
+### 問題（リファクタリング前）
+
+`mapper.py` の複数箇所で言語名による分岐が発生していた:
+```python
+if profile.name == "python":    # _get_function_description
+if profile.name == "python":    # _get_file_header_comment
+if profile.name == "typescript" and not _is_for_of(...):  # for ループ
+elif profile.name == "go":      # for ループ（×1）
+elif profile.name == "go" and node_type == "assignment_statement":  # 直接代入（×3）
+if profile.name == "typescript":  # import 抽出
+elif profile.name == "go":        # import 抽出
+if profile.name == "typescript":  # モジュール変数
+elif profile.name == "go":        # モジュール変数
+_extract_ts_type_definition(child)  # 型定義（ベタ書き）
+```
+
+### 解決策
+
+#### ① `LanguageProfile` に構造フラグを追加
+
+| 追加フィールド | 型 | 意味 |
+|---|---|---|
+| `function_description_style` | `str` | `"comment"` または `"docstring"` |
+| `has_module_docstring` | `bool` | ファイル先頭にモジュール docstring を持つか |
+| `for_loop_flavor` | `str` | `"of_keyword"` / `"range_clause"` / `"always_foreach"` |
+| `direct_statement_types` | `frozenset[str]` | 直接代入文のノードタイプ集合 |
+
+#### ② mapper.py にディスパッチテーブルを追加
+
+```python
+_DIRECT_STATEMENT_MAPPER  ← ノードタイプ → 変換関数
+_IMPORT_NODE_EXTRACTOR    ← 言語名 → import 抽出関数
+_MODULE_VAR_NODE_EXTRACTOR← 言語名 → モジュール変数抽出関数
+_TYPE_DEF_NODE_EXTRACTOR  ← 言語名 → 型定義抽出関数
+```
+
+### 結果
+
+`mapper.py` のロジック関数内から `profile.name == "..."` が完全に消滅。
+新言語追加時はテーブルへの追記のみ。**285件 全グリーン**。
+
+---
+
+## Phase R2 — 完了 ✅（リファクタリング）
+
+**完了日**: 2026-05-25  
+**目的**: 新言語対応を「既存ファイルを一切変更せず、1ファイル追加するだけ」で完結できるアーキテクチャに刷新する。
+
+### 問題（R2 前）
+
+新言語 C++ を追加しようとすると、既存の4ファイルを修正する必要があった:
+```
+src/ir/profiles.py    ← CPP_PROFILE 定数追加
+src/ir/mapper.py      ← 抽出関数追加 + テーブル4箇所にエントリ追加
+src/pipeline.py       ← _LANGUAGE_CONFIGS に1行追加
+src/parser/           ← パーサー新規追加（これは不可避）
+```
+
+### 解決策: 言語プラグインシステム
+
+#### 新しいファイル構造
+
+```
+src/
+  ir/
+    node_utils.py   ← ★ 新規: extract_node_text 等の共有ユーティリティ
+    profiles.py     → LanguageProfile 定義のみ（定数は各言語ファイルへ移動）
+    mapper.py       → 言語名参照ゼロ。LanguagePlugin を受け取る純粋な変換エンジン
+  languages/
+    __init__.py     ← ★ 新規: LanguagePlugin 型 + discover_plugins() 自動探索エンジン
+    typescript.py   ← ★ 新規: TypeScript のすべて（Profile + 抽出関数 + PLUGIN 定数）
+    python.py       ← ★ 新規: Python のすべて
+    go.py           ← ★ 新規: Go のすべて
+  pipeline.py       → _LANGUAGE_CONFIGS 廃止 → discover_plugins() に切り替え
+```
+
+#### `LanguagePlugin` frozen dataclass
+
+```python
+@dataclass(frozen=True)
+class LanguagePlugin:
+    extensions:                   tuple[str, ...]
+    profile:                      LanguageProfile
+    parse_source:                 Callable[[str], Node]
+    import_extractor:             Callable[[Node], list[ImportSpec]]
+    module_var_extractor:         Callable[[Node], Optional[ModuleVariableSpec]]
+    type_def_extractor:           Callable[[Node], Optional[TypeDefinitionSpec]]
+    direct_statement_extractors:  tuple[tuple[str, Callable], ...]
+    class_extractor:              Callable[[Node], Optional[ClassSpec]]  # R3 追加
+```
+
+#### 自動探索エンジン
+
+`src/languages/` 内のすべての `*.py` ファイルを走査し、
+`PLUGIN` 定数を持つモジュールを自動的に登録する。
+
+### 結果: Java を追加するとき
+
+```
+1. src/parser/java_parser.py   ← パーサー新規作成（不可避）
+2. src/languages/java.py       ← JAVA_PROFILE + 抽出関数 + PLUGIN 定数（これだけ）
+   ↑ 既存ファイルへの変更ゼロ。pipeline.py も profiles.py も mapper.py も触らない
+```
+
+**285件 全グリーン**（実行時間 0.25s）  
+※ Phase R3 完了後は **319件**。
+
+---
+
+## Phase R3 — 完了 ✅（Python クラス定義対応）
+
+**完了日**: 2026-05-25  
+**目的**: Python ファイルに含まれる `@dataclass` / `class` 定義をMarkdown仕様書に出力する。
+
+### 問題（R3 前）
+
+`src/ir/profiles.py` のように「関数を持たない・クラス定義だけ」の Python ファイルをコンパイルすると、
+`@dataclass` 定義（14行以降全体）が完全に出力されなかった。
+
+### 実装内容
+
+#### ① 新 IR 型（`src/ir/types.py`）
+
+| 型名 | 意味 |
+|---|---|
+| `ClassFieldSpec` | クラスの1フィールド（名前・型・デフォルト値・インラインコメント）|
+| `ClassSpec` | クラス定義全体（名前・is_dataclass フラグ・docstring・フィールド列）|
+
+`ModuleSpec` に `class_definitions: tuple[ClassSpec, ...] = ()` フィールドを追加。
+
+#### ② 言語プロファイル（`src/ir/profiles.py`）
+
+`class_node_types: frozenset[str]` フィールドを追加:
+- Python: `frozenset({"decorated_definition", "class_definition"})`
+- TypeScript / Go: `frozenset()` （未対応）
+
+#### ③ 言語プラグイン（`src/languages/__init__.py`）
+
+`class_extractor: Callable[[Node], Optional[ClassSpec]]` フィールドを追加。
+
+#### ④ Python クラス抽出（`src/languages/python.py`）
+
+| 関数 | 役割 |
+|---|---|
+| `_is_dataclass_decorator(decorator_node)` | `@dataclass` デコレータを検出 |
+| `_extract_class_docstring(block_node)` | クラス先頭の docstring を抽出 |
+| `_extract_class_fields(block_node)` | フィールド一覧を抽出（型・デフォルト・インラインコメント）|
+| `extract_py_class(node)` | 公開インターフェース（PLUGIN に登録）|
+
+**インラインコメントの判定**: `comment` ノードの `start_point[0]`（行番号）がフィールドの `expression_statement` と同一なら同行のインラインコメントとして付与する。別行の前置ブロックコメントは無視する。
+
+#### ⑤ レンダリング（`src/renderer/markdown.py`）
+
+```markdown
+## 🏛️ クラス定義
+
+### 🏛️ `LanguageProfile` (dataclass)
+
+> docstring の内容...
+
+| フィールド名 | 型 | デフォルト値 | 説明 |
+|---|---|---|---|
+| `name` | `str` | — | 例: "typescript", "python", "go" |
+| `port` | `int` | `8080` | — |
+```
+
+### テスト追加
+
+| テストクラス | 件数 | 内容 |
+|---|---|---|
+| `TestPyClassDefinition` (test_mapper.py) | 14件 | クラス・フィールド抽出の単体テスト |
+| `TestRenderClassDefinitions` (test_renderer.py) | 14件 | Markdown レンダリングの単体テスト |
+| `TestPyClassE2E` (test_pipeline.py) | 6件 | E2E テスト |
+
+**319件 全グリーン**（実行時間 0.33s）
+
+---
+
 ## 未来のフェーズ（参考）
 
 | フェーズ | 内容 |
 |---|---|
-| Phase 5 | Go / Java 対応（新しい `LanguageProfile` + パーサーを追加するだけ） |
+| Phase 5B | Java 対応（`src/languages/java.py` を1ファイル追加するだけ） |
 | Phase 6 | Git フック連携（コミット時に自動再生成） |
 
 ---
 
-## 既知の制限事項（Phase 1 時点）
+## 既知の制限事項
 
 1. **アロー関数・メソッドは未対応**: `const fn = () => {}` や クラスメソッドは検出しない
 2. **ネストした関数は未対応**: 内部関数宣言は無視される
 3. **型情報なし**: 変数の型（`User`, `number` 等）は仕様書に含まれない
 4. **変数名依存**: 意味不明な変数名（`x`, `tmp`）の場合、出力も意味不明になる
+5. **Go の for ループ関数は mapper.py に残存**: for-range / for-clause 関数は `_extract_body_ir_nodes` に依存するため循環インポート回避のため `mapper.py` に保持している
+6. **Python クラスのフィールド説明はインラインコメントのみ取得**: `name: str  # 説明` の形式のみ対応。フィールド前の複数行ブロックコメントは仕様上無視する（次フィールドの前置コメントと区別できないため）
+7. **TypeScript / Go のクラス定義は未対応**: TypeScript `class` / Go の `struct` は将来フェーズで対応予定
 
 ---
 
@@ -205,6 +438,9 @@ python main.py myproject/ output_dir/
 | 項目 | バージョン |
 |---|---|
 | Python | 3.14.3 |
+| pytest | 9.0.3 |
 | tree-sitter | 0.25.2 |
 | tree-sitter-typescript | 0.23.2 |
+| tree-sitter-python | 0.25.0 |
+| tree-sitter-go | 0.25.0 |
 | OS | Windows 11 Pro |

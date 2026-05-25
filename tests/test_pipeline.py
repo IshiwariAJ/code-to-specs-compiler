@@ -317,3 +317,77 @@ class TestGoE2E:
         )
         result = compile_to_spec(src, "test", ".go")
         assert "繰り返し処理" in result
+
+
+# ---------------------------------------------------------------------------
+# Python @dataclass / class の E2E テスト
+# ---------------------------------------------------------------------------
+
+
+class TestPyClassE2E:
+    """Python クラス定義が Markdown 仕様書に正しく出力されることを E2E で検証する。"""
+
+    def test_dataclass_section_appears_in_output(self):
+        src = (
+            "from dataclasses import dataclass\n"
+            "@dataclass(frozen=True)\n"
+            "class Config:\n"
+            "    host: str\n"
+            "    port: int = 8080\n"
+        )
+        result = compile_to_spec(src, "config", ".py")
+        assert "🏛️ クラス定義" in result
+        assert "`Config` (dataclass)" in result
+
+    def test_class_fields_rendered_as_table(self):
+        src = (
+            "@dataclass\n"
+            "class Point:\n"
+            "    x: int\n"
+            "    y: float\n"
+        )
+        result = compile_to_spec(src, "point", ".py")
+        assert "`x`" in result
+        assert "`int`" in result
+        assert "`y`" in result
+        assert "`float`" in result
+
+    def test_plain_class_also_extracted(self):
+        src = (
+            "class MyError(Exception):\n"
+            "    message: str\n"
+        )
+        result = compile_to_spec(src, "errors", ".py")
+        assert "🏛️ クラス定義" in result
+        assert "`MyError` (class)" in result
+
+    def test_field_with_default_value_shown(self):
+        src = (
+            "@dataclass\n"
+            "class Config:\n"
+            "    debug: bool = False\n"
+        )
+        result = compile_to_spec(src, "config", ".py")
+        assert "`False`" in result
+
+    def test_class_docstring_shown_in_output(self):
+        src = (
+            "@dataclass\n"
+            "class Config:\n"
+            '    """設定値クラス。"""\n'
+            "    host: str\n"
+        )
+        result = compile_to_spec(src, "config", ".py")
+        assert "設定値クラス" in result
+
+    def test_class_section_before_function_section(self):
+        src = (
+            "@dataclass\n"
+            "class Config:\n"
+            "    host: str\n"
+            "def run(cfg): pass\n"
+        )
+        result = compile_to_spec(src, "main", ".py")
+        class_pos = result.index("🏛️ クラス定義")
+        func_pos = result.index("🔧 関数")
+        assert class_pos < func_pos

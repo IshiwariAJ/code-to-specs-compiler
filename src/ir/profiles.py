@@ -2,8 +2,8 @@
 LanguageProfile — 言語ごとの AST ノードタイプ仕様を保持する不変データ構造
 
 設計原則:
-- このモジュールはデータを定義するだけ。ロジックは一切持たない
-- 新しい言語を追加する際は、LANGUAGE_PROFILES に定数を1つ追加するだけでよい
+- このモジュールはデータ型を定義するだけ。ロジックは一切持たない
+- 各言語のプロファイル定数は src/languages/<言語名>.py に定義する
 - mapper.py はこの Profile を参照して言語差異を吸収する
 """
 from __future__ import annotations
@@ -18,6 +18,11 @@ class LanguageProfile:
 
     mapper.py はこの Profile を参照することで、
     言語に依存した AST ノードタイプ名の違いを吸収する。
+
+    各言語のプロファイル定数は src/languages/<言語名>.py に定義されている:
+      - TYPESCRIPT_PROFILE → src/languages/typescript.py
+      - PYTHON_PROFILE     → src/languages/python.py
+      - GO_PROFILE         → src/languages/go.py
     """
     # 言語識別子
     name: str  # 例: "typescript", "python", "go"
@@ -118,66 +123,31 @@ class LanguageProfile:
     #     Python    → ""
     #     Go        → "statement_list"
 
+    # ---------- mapper.py の分岐を言語名ではなく設定値で行うためのフラグ ----------
 
-# ---------------------------------------------------------------------------
-# 各言語の定数プロファイル
-# ---------------------------------------------------------------------------
+    # 関数説明の取得スタイル
+    # "comment":   関数直前のコメント（TypeScript / Go）
+    # "docstring": 関数本体先頭の文字列リテラル（Python）
+    function_description_style: str
 
-TYPESCRIPT_PROFILE = LanguageProfile(
-    name="typescript",
-    function_node_type="function_declaration",
-    for_each_node_type="for_in_statement",
-    for_range_node_type="for_statement",
-    guard_action_types=frozenset({"return_statement", "throw_statement"}),
-    condition_has_outer_parens=True,
-    augmented_assignment_type="augmented_assignment_expression",
-    assignment_type="assignment_expression",
-    call_type="call_expression",
-    elif_structure="nested",
-    lexical_declaration_types=frozenset({"lexical_declaration", "variable_declaration"}),
-    import_node_types=frozenset({"import_statement"}),
-    module_var_node_types=frozenset({"lexical_declaration"}),
-    type_alias_node_type="type_alias_declaration",
-    interface_node_type="interface_declaration",
-    block_inner_node_type="",
-)
+    # ファイル先頭にモジュール docstring（expression_statement 内の string）が存在しうるか
+    # Python: True / TypeScript, Go: False
+    has_module_docstring: bool
 
-PYTHON_PROFILE = LanguageProfile(
-    name="python",
-    function_node_type="function_definition",
-    for_each_node_type="for_statement",
-    for_range_node_type="",  # Python に古典的な for ループは存在しない
-    guard_action_types=frozenset({"return_statement", "raise_statement"}),
-    condition_has_outer_parens=False,
-    augmented_assignment_type="augmented_assignment",
-    assignment_type="assignment",
-    call_type="call",
-    elif_structure="flat",
-    lexical_declaration_types=frozenset(),  # Python は assignment で処理
-    import_node_types=frozenset({"import_statement", "import_from_statement", "future_import_statement"}),
-    module_var_node_types=frozenset({"expression_statement"}),
-    type_alias_node_type="",   # Python は型エイリアス未対応（3.12+ の type 文は将来対応）
-    interface_node_type="",    # Python はインターフェース未対応
-    block_inner_node_type="",
-)
+    # for ループのセマンティクス判定方法
+    # "of_keyword":     for_in_statement 内の 'of' 子ノードで for-of/for-in を区別（TypeScript）
+    # "range_clause":   range_clause / for_clause の有無で種別を判定（Go）
+    # "always_foreach": 常に FOR_EACH として扱う（Python）
+    for_loop_flavor: str
 
-GO_PROFILE = LanguageProfile(
-    name="go",
-    function_node_type="function_declaration",
-    # Go の for は range / C スタイル / 無限ループがすべて for_statement
-    # 内部で range_clause / for_clause の有無を判定して振り分ける
-    for_each_node_type="for_statement",
-    for_range_node_type="",  # for_each_node_type と同じノード。空文字で第2パスを無効化
-    guard_action_types=frozenset({"return_statement"}),  # Go に throw はない（panic は call）
-    condition_has_outer_parens=False,   # Go は if x > 0 { の形（括弧不要）
-    augmented_assignment_type="",       # Go の代入は expression_statement に包まれない直接文
-    assignment_type="",                 # 同上
-    call_type="call_expression",
-    elif_structure="nested",            # else if → alternative = if_statement（TypeScript と同じ構造）
-    lexical_declaration_types=frozenset(),  # Go の代入は直接処理（assignment_statement / short_var_declaration）
-    import_node_types=frozenset({"import_declaration"}),
-    module_var_node_types=frozenset({"var_declaration", "const_declaration"}),
-    type_alias_node_type="",    # Go の type 宣言は将来対応
-    interface_node_type="",
-    block_inner_node_type="statement_list",  # Go: block → statement_list → 文ノード
-)
+    # expression_statement を介さない直接代入文のノードタイプ集合
+    # TypeScript / Python → frozenset()（すべて expression_statement 経由）
+    # Go → frozenset({"assignment_statement", "short_var_declaration", "var_declaration"})
+    direct_statement_types: frozenset[str]
+
+    # クラス定義のノードタイプ集合（対応しない言語は空集合）
+    # Python → frozenset({"decorated_definition", "class_definition"})
+    #   decorated_definition: @dataclass 等のデコレータ付きクラス
+    #   class_definition:     素のクラス定義
+    # TypeScript / Go → frozenset()（クラスは TypeDefinitionSpec / 将来対応で処理）
+    class_node_types: frozenset[str]
