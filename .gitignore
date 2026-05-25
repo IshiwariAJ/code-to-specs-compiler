@@ -1,0 +1,53 @@
+# ===========================================================
+# code-to-specs-compiler — .gitignore
+# ===========================================================
+
+# Python キャッシュ / バイトコード
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# pytest / テストキャッシュ
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# 仮想環境
+.venv/
+venv/
+env/
+ENV/
+
+# パッケージビルド成果物
+dist/
+build/
+*.egg-info/
+*.egg
+MANIFEST
+
+# IDE / エディタ設定
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS 生成ファイル
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code 設定・内部ドキュメント（OSS 公開対象外）
+.claude/
+CLAUDE.md
+自然言語コンパイラ（Universal Code to Specs）詳細設計書.md
+
+# コンパイル出力（サンプル出力は examples_specs/ のみ管理対象外に）
+examples_specs/
+*_specs/
+
+# 一時ファイル
+*.tmp
+*.bak
