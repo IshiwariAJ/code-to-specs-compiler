@@ -5,7 +5,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-236%20passing-brightgreen.svg)](#テスト--testing)
+[![Tests](https://img.shields.io/badge/tests-319%20passing-brightgreen.svg)](#テスト--testing)
 
 ---
 
@@ -22,8 +22,8 @@ LLMは使用しません。[tree-sitter](https://tree-sitter.github.io/tree-sitt
 |---|---|
 | 🎯 **ハルシネーションなし** | AIを使わないため、コードに書いていないことが仕様書に現れない |
 | 🔒 **完全ローカル実行** | 機密コード・社内コードも外部送信なしで安全に処理 |
-| 🌐 **多言語・統一フォーマット** | TypeScript / Python の両方から同一Markdownフォーマットで出力 |
-| ⚡ **高速・決定論的** | 同じ入力からは常に同じ出力（236テスト全グリーン） |
+| 🌐 **多言語・統一フォーマット** | TypeScript / Python / Go から同一Markdownフォーマットで出力 |
+| ⚡ **高速・決定論的** | 同じ入力からは常に同じ出力（319テスト全グリーン） |
 
 ---
 
@@ -33,7 +33,10 @@ LLMは使用しません。[tree-sitter](https://tree-sitter.github.io/tree-sitt
 |---|---|---|
 | TypeScript | `.ts`, `.tsx` | ✅ 対応済み |
 | Python | `.py` | ✅ 対応済み |
-| Go / Java | — | 🔜 将来対応予定 |
+| Go | `.go` | ✅ 対応済み |
+| Java など | — | 🔜 将来対応予定 |
+
+新言語の追加は `src/languages/<言語名>.py` を1ファイル作成するだけです（既存ファイルへの変更不要）。
 
 ---
 
@@ -52,6 +55,7 @@ pip install -r requirements.txt
 | `tree-sitter` | ≥ 0.21.0 | AST パーサーエンジン |
 | `tree-sitter-typescript` | ≥ 0.21.0 | TypeScript文法定義 |
 | `tree-sitter-python` | ≥ 0.21.0 | Python文法定義 |
+| `tree-sitter-go` | ≥ 0.21.0 | Go文法定義 |
 
 ---
 
@@ -129,26 +133,31 @@ function calculateUserBenefit(user: User): BenefitResult {
 ### アーキテクチャ
 
 ```
-[ソースコード (.ts / .py)]
+[ソースコード (.ts / .py / .go)]
         │
-        ▼  src/parser/   【フロントエンド】
-  tree-sitter で AST を生成
+        ▼  src/languages/<言語名>.py  【言語プラグイン（自動検出）】
+  parse_source() で tree-sitter AST を生成
         │
-        ▼  src/ir/mapper.py  【ミドルウェア】
+        ▼  src/ir/mapper.py           【ミドルウェア】
   AST → Universal IR (frozen dataclass)
         │
-        ▼  src/renderer/markdown.py  【バックエンド】
+        ▼  src/renderer/markdown.py   【バックエンド】
   Universal IR → Markdown 日本語仕様書
         │
         ▼
 [Markdown 仕様書 (.md)]
 ```
 
-- **フロントエンド**: 言語ごとの tree-sitter パーサー（`src/parser/`）
-- **ミドルウェア**: `LanguageProfile` による言語差異の吸収と Universal IR へのマッピング（`src/ir/`）
-- **バックエンド**: 言語非依存の Markdown レンダラー（`src/renderer/`）
+- **言語プラグイン** (`src/languages/`): 言語ごとのパーサー・抽出関数・プロファイルをまとめた `LanguagePlugin` 定数。`src/languages/` に置くだけで自動検出される
+- **ミドルウェア** (`src/ir/`): `LanguagePlugin` を受け取り、言語非依存の Universal IR に変換
+- **バックエンド** (`src/renderer/`): Universal IR から Markdown を生成（言語の違いを一切知らない）
 
-新言語の追加は `_LANGUAGE_CONFIGS` 辞書と `LanguageProfile` の定数を1つ追加するだけです。
+**新言語の追加方法:**
+```
+src/parser/<言語名>_parser.py  ← tree-sitter パーサー（不可避）
+src/languages/<言語名>.py      ← LanguagePlugin 定数を定義するだけ
+                                  既存ファイルへの変更ゼロ
+```
 
 ---
 
@@ -158,12 +167,13 @@ function calculateUserBenefit(user: User): BenefitResult {
 |---|---|
 | `GuardClause` | `if (...) { return / throw / raise }` — 早期中断パターン |
 | `ConditionBlock` | `if / elif / else` チェーン全体 |
-| `LoopNode` | `for...of`（FOR_EACH）/ 古典的`for`（FOR_RANGE）/ Python `for` |
-| `DataTransformation` | `+=`, `-=`, `=` などの代入・演算更新 |
+| `LoopNode` | `for...of`（FOR_EACH）/ 古典的`for`（FOR_RANGE）/ Python `for` / Go `range` |
+| `DataTransformation` | `+=`, `-=`, `=`, `:=` などの代入・演算更新 |
 | `SideEffect` | 関数呼び出し（`console.log`, `arr.push` など） |
 | `ImportSpec` | インポート文（`import`, `from...import`, `__future__`） |
 | `ModuleVariableSpec` | モジュールレベルの定数・変数 |
 | `TypeDefinitionSpec` | TypeScript の `type` エイリアス・`interface` |
+| `ClassSpec` | Python の `@dataclass` / `class`（フィールド・型・デフォルト値・docstring）|
 
 コメント情報（JSDoc、docstring、インラインコメント）も抽出してブロッククォート形式で出力します。
 
@@ -178,11 +188,11 @@ pytest
 
 | テストファイル | 件数 | 内容 |
 |---|---|---|
-| `tests/test_mapper.py` | 〜80件 | AST → IR マッピングのユニットテスト |
-| `tests/test_renderer.py` | 〜60件 | IR → Markdown レンダリングのユニットテスト |
-| `tests/test_pipeline.py` | 〜32件 | E2E 統合テスト |
-| `tests/test_batch.py` | 〜37件 | バッチコンパイル機能のテスト |
-| **合計** | **236件** | **全グリーン** |
+| `tests/test_mapper.py` | ~160件 | AST → IR マッピングのユニットテスト |
+| `tests/test_renderer.py` | ~90件 | IR → Markdown レンダリングのユニットテスト |
+| `tests/test_pipeline.py` | ~60件 | E2E 統合テスト |
+| `tests/test_batch.py` | 37件 | バッチコンパイル機能のテスト |
+| **合計** | **319件** | **全グリーン** |
 
 ---
 
@@ -207,8 +217,8 @@ It uses no LLMs — only compiler technology ([tree-sitter](https://tree-sitter.
 |---|---|
 | 🎯 **Zero hallucination** | No AI means the spec only contains what the code actually says |
 | 🔒 **Fully local** | Confidential code never leaves your machine |
-| 🌐 **Multi-language, unified format** | TypeScript and Python produce identical Markdown structure |
-| ⚡ **Fast & deterministic** | Same input always produces the same output (236 tests passing) |
+| 🌐 **Multi-language, unified format** | TypeScript, Python, and Go all produce the same Markdown structure |
+| ⚡ **Fast & deterministic** | Same input always produces the same output (319 tests passing) |
 
 ---
 
@@ -218,7 +228,10 @@ It uses no LLMs — only compiler technology ([tree-sitter](https://tree-sitter.
 |---|---|---|
 | TypeScript | `.ts`, `.tsx` | ✅ Supported |
 | Python | `.py` | ✅ Supported |
-| Go / Java | — | 🔜 Planned |
+| Go | `.go` | ✅ Supported |
+| Java, etc. | — | 🔜 Planned |
+
+Adding a new language requires only one new file (`src/languages/<lang>.py`) — no changes to existing files.
 
 ---
 
@@ -253,12 +266,12 @@ python main.py myproject/ docs/specs/
 ### Architecture
 
 ```
-[Source Code (.ts / .py)]
+[Source Code (.ts / .py / .go)]
         │
-        ▼  src/parser/          [Frontend]
-  tree-sitter AST generation
+        ▼  src/languages/<lang>.py   [Language Plugin (auto-discovered)]
+  parse_source() → tree-sitter AST
         │
-        ▼  src/ir/mapper.py     [Middleware]
+        ▼  src/ir/mapper.py          [Middleware]
   AST → Universal IR (frozen dataclass)
         │
         ▼  src/renderer/markdown.py  [Backend]
@@ -268,7 +281,12 @@ python main.py myproject/ docs/specs/
 [Markdown Spec (.md)]
 ```
 
-Adding a new language requires only one `LanguageProfile` constant and one entry in `_LANGUAGE_CONFIGS`.
+**Adding a new language:**
+```
+src/parser/<lang>_parser.py  ← tree-sitter parser (required)
+src/languages/<lang>.py      ← define a LanguagePlugin constant (that's it)
+                                no changes to existing files
+```
 
 ---
 
@@ -278,12 +296,13 @@ Adding a new language requires only one `LanguageProfile` constant and one entry
 |---|---|
 | `GuardClause` | Early-return / throw / raise patterns |
 | `ConditionBlock` | `if / elif / else` chains |
-| `LoopNode` | `for...of` (FOR_EACH), C-style `for` (FOR_RANGE), Python `for` |
-| `DataTransformation` | `+=`, `-=`, `=` assignments |
+| `LoopNode` | `for...of` (FOR_EACH), C-style `for` (FOR_RANGE), Python `for`, Go `range` |
+| `DataTransformation` | `+=`, `-=`, `=`, `:=` assignments |
 | `SideEffect` | Function calls with side effects |
 | `ImportSpec` | Import statements (including `__future__`) |
 | `ModuleVariableSpec` | Module-level constants and variables |
 | `TypeDefinitionSpec` | TypeScript `type` aliases and `interface` declarations |
+| `ClassSpec` | Python `@dataclass` / `class` (fields, types, defaults, docstring) |
 
 Comments (JSDoc, docstrings, inline comments) are also extracted and rendered as blockquotes.
 
@@ -296,7 +315,7 @@ pip install pytest
 pytest
 ```
 
-236 tests, all green.
+319 tests, all green.
 
 ---
 
