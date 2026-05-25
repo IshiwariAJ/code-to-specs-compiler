@@ -1,5 +1,10 @@
 // ユーザー特典計算モジュール（設計書のサンプルコードを TypeScript で実装したもの）
 
+// モジュール定数（ModuleVariableSpec のサンプル）
+const MAX_POINTS = 1000;
+const PREMIUM_THRESHOLD = 100000;
+
+// 型定義（TypeDefinitionSpec のサンプル）
 type UserStatus = "ACTIVE" | "INACTIVE" | "BANNED";
 
 interface User {
@@ -13,6 +18,9 @@ interface BenefitResult {
   message: string;
 }
 
+/**
+ * ユーザーの購入履歴からポイント特典を計算して返す
+ */
 function calculateUserBenefit(user: User): BenefitResult {
   // ガード句: 無効なユーザーは即座に弾く
   if (user.status !== "ACTIVE") {
@@ -26,8 +34,8 @@ function calculateUserBenefit(user: User): BenefitResult {
   }
 
   // 合計金額とランクに応じて特典を決定する
-  if (totalAmount >= 100000 && user.rank === "Gold") {
-    return { points: 1000, message: "プレミアム特典付与" };
+  if (totalAmount >= PREMIUM_THRESHOLD && user.rank === "Gold") {
+    return { points: MAX_POINTS, message: "プレミアム特典付与" };
   } else if (totalAmount >= 50000) {
     return { points: 500, message: "シルバー特典付与" };
   } else {
