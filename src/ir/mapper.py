@@ -61,12 +61,26 @@ def _extract_condition_text(if_node: Node) -> str:
     return _strip_outer_parens(_extract_node_text(condition_node))
 
 
-def _get_named_statements(block_node: Node) -> list[Node]:
-    """ブロックノード（statement_block / block）から名前付き文ノードを返す。"""
-    return [
-        child for child in block_node.named_children
-        if child.type != "comment"
-    ]
+def _get_block_statements(block_node: Node, profile: LanguageProfile) -> list[Node]:
+    """
+    ブロックノードから文ノードのリストを返す。
+
+    言語差異を吸収する:
+    - TypeScript / Python: block の named_children が直接文ノードを含む
+    - Go: block → statement_list → 文ノード の2段構造
+
+    profile.block_inner_node_type が設定されている場合は1段深く潜る。
+    コメントノードは除外する。
+    """
+    if profile.block_inner_node_type:
+        inner = next(
+            (c for c in block_node.named_children if c.type == profile.block_inner_node_type),
+            None,
+        )
+        children = inner.named_children if inner is not None else []
+    else:
+        children = block_node.named_children
+    return [c for c in children if c.type != "comment"]
 
 
 def _truncate_text(text: str, max_len: int = 60) -> str:
@@ -122,8 +136,8 @@ def _get_function_description(fn_node: Node, profile: LanguageProfile) -> str:
     """
     関数の説明文を返す。
 
-    TypeScript: 関数直前の JSDoc または行コメント
-    Python:     関数本体先頭の docstring
+    TypeScript / Go: 関数直前の JSDoc または行コメント
+    Python:          関数本体先頭の docstring
     """
     if profile.name == "python":
         return _get_py_function_docstring(fn_node)
@@ -134,8 +148,8 @@ def _get_file_header_comment(root_node: Node, profile: LanguageProfile) -> str:
     """
     ファイル先頭の連続したコメントノード（またはモジュール docstring）を返す。
 
-    TypeScript: 先頭に連続する comment ノードを結合する
-    Python:     先頭の comment ノード群、または最初の expression_statement の string
+    TypeScript / Go: 先頭に連続する comment ノードを結合する
+    Python:          先頭の comment ノード群、または最初の expression_statement の string
     """
     comments: list[str] = []
     for child in root_node.named_children:
@@ -174,7 +188,7 @@ def _is_guard_clause(if_node: Node, profile: LanguageProfile) -> bool:
     - then ブロックにちょうど1つの文がある
     - その1文が profile.guard_action_types に含まれるタイプである
     """
-    # TypeScript: alternative フィールドで else/elif を検出
+    # TypeScript / Go: alternative フィールドで else/elif を検出
     # Python: named_children に elif_clause / else_clause があれば除外
     if profile.elif_structure == "nested":
         if if_node.child_by_field_name("alternative") is not None:
@@ -192,7 +206,7 @@ def _is_guard_clause(if_node: Node, profile: LanguageProfile) -> bool:
     if consequence is None:
         return False
 
-    statements = _get_named_statements(consequence)
+    statements = _get_block_statements(consequence, profile)
     if len(statements) != 1:
         return False
 
@@ -210,6 +224,7 @@ def _extract_guard_action_text(statement_node: Node) -> str:
 
     TypeScript: return_statement, throw_statement
     Python:     return_statement, raise_statement
+    Go:         return_statement
     """
     value_node = next(
         (child for child in statement_node.named_children),
@@ -240,12 +255,12 @@ def _extract_guard_action_text(statement_node: Node) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _map_if_to_guard_clause(if_node: Node) -> GuardClause:
+def _map_if_to_guard_clause(if_node: Node, profile: LanguageProfile) -> GuardClause:
     """ガード句パターンの if 文を GuardClause IR ノードに変換する。"""
     condition_text = _extract_condition_text(if_node)
 
     consequence = if_node.child_by_field_name("consequence")
-    statements = _get_named_statements(consequence) if consequence is not None else []
+    statements = _get_block_statements(consequence, profile) if consequence is not None else []
     action_text = _extract_guard_action_text(statements[0]) if statements else ""
 
     return GuardClause(
@@ -256,23 +271,25 @@ def _map_if_to_guard_clause(if_node: Node) -> GuardClause:
 
 
 # ---------------------------------------------------------------------------
-# マッピング: if/else-if/else チェーン → ConditionBlock IR（TypeScript: nested）
+# マッピング: if/else-if/else チェーン → ConditionBlock IR
 # ---------------------------------------------------------------------------
 
 
-def _extract_case_action_texts(block_node: Node) -> tuple[str, ...]:
+def _extract_case_action_texts(
+    block_node: Node, profile: LanguageProfile
+) -> tuple[str, ...]:
     """ブロックノードの各文のテキストをアクション一覧として返す。"""
-    statements = _get_named_statements(block_node)
+    statements = _get_block_statements(block_node, profile)
     return tuple(_extract_node_text(stmt) for stmt in statements)
 
 
-def _build_case_from_if(if_node: Node) -> CaseNode:
+def _build_case_from_if(if_node: Node, profile: LanguageProfile) -> CaseNode:
     """if 文の単一ケース（条件と本体アクション）を CaseNode に変換する。"""
     condition_text = _extract_condition_text(if_node)
 
     consequence = if_node.child_by_field_name("consequence")
     action_texts = (
-        _extract_case_action_texts(consequence)
+        _extract_case_action_texts(consequence, profile)
         if consequence is not None
         else ()
     )
@@ -280,33 +297,42 @@ def _build_case_from_if(if_node: Node) -> CaseNode:
     return CaseNode(condition_text=condition_text, action_texts=action_texts)
 
 
-def _collect_all_cases_nested(if_node: Node) -> list[CaseNode]:
+def _collect_all_cases_nested(if_node: Node, profile: LanguageProfile) -> list[CaseNode]:
     """
-    TypeScript スタイル: else_clause → if_statement の入れ子を再帰的に辿る。
+    nested スタイル（TypeScript / Go）の else if チェーンを再帰的に辿る。
+
+    TypeScript: alternative → else_clause → [if_statement | statement_block]
+    Go:         alternative → [if_statement | block]（else_clause ラッパーなし）
 
     再帰の終了条件:
     - alternative がない（else なし）
-    - alternative の本体が statement_block（else ブロック）
+    - alternative の本体が statement_block / block（else ブロック）
     """
-    cases: list[CaseNode] = [_build_case_from_if(if_node)]
+    cases: list[CaseNode] = [_build_case_from_if(if_node, profile)]
 
     alternative = if_node.child_by_field_name("alternative")
     if alternative is None:
         return cases
 
-    else_body = next(
-        (child for child in alternative.named_children),
-        None,
-    )
+    # Go: alternative が直接 if_statement または block
+    # TypeScript: alternative は else_clause（ラッパー）→ 中の子を取り出す
+    if alternative.type in ("if_statement", "block"):
+        else_body = alternative  # Go スタイル
+    else:
+        else_body = next(
+            (child for child in alternative.named_children),
+            None,
+        )  # TypeScript スタイル（else_clause を unwrap）
+
     if else_body is None:
         return cases
 
     if else_body.type == "if_statement":
         # else if: 再帰
-        cases.extend(_collect_all_cases_nested(else_body))
+        cases.extend(_collect_all_cases_nested(else_body, profile))
     else:
-        # else ブロック
-        action_texts = _extract_case_action_texts(else_body)
+        # else ブロック（statement_block / block）
+        action_texts = _extract_case_action_texts(else_body, profile)
         cases.append(CaseNode(
             condition_text="上記のいずれにも該当しない場合（デフォルト）",
             action_texts=action_texts,
@@ -315,7 +341,7 @@ def _collect_all_cases_nested(if_node: Node) -> list[CaseNode]:
     return cases
 
 
-def _collect_all_cases_flat(if_node: Node) -> list[CaseNode]:
+def _collect_all_cases_flat(if_node: Node, profile: LanguageProfile) -> list[CaseNode]:
     """
     Python スタイル: elif_clause / else_clause が if_statement の兄弟として並ぶ。
 
@@ -330,7 +356,7 @@ def _collect_all_cases_flat(if_node: Node) -> list[CaseNode]:
     # if 本体のケース
     condition_text = _strip_outer_parens(_extract_node_text(named[0]))
     block_node = named[1]
-    action_texts = _extract_case_action_texts(block_node)
+    action_texts = _extract_case_action_texts(block_node, profile)
     cases: list[CaseNode] = [CaseNode(condition_text=condition_text, action_texts=action_texts)]
 
     # elif / else ケース（インデックス 2 以降）
@@ -344,7 +370,7 @@ def _collect_all_cases_flat(if_node: Node) -> list[CaseNode]:
                 else ""
             )
             elif_actions = (
-                _extract_case_action_texts(conseq_node)
+                _extract_case_action_texts(conseq_node, profile)
                 if conseq_node is not None
                 else ()
             )
@@ -352,7 +378,7 @@ def _collect_all_cases_flat(if_node: Node) -> list[CaseNode]:
 
         elif node.type == "else_clause":
             body = node.child_by_field_name("body")
-            else_actions = _extract_case_action_texts(body) if body is not None else ()
+            else_actions = _extract_case_action_texts(body, profile) if body is not None else ()
             cases.append(CaseNode(
                 condition_text="上記のいずれにも該当しない場合（デフォルト）",
                 action_texts=else_actions,
@@ -364,9 +390,9 @@ def _collect_all_cases_flat(if_node: Node) -> list[CaseNode]:
 def _map_if_to_condition_block(if_node: Node, profile: LanguageProfile) -> ConditionBlock:
     """if/else チェーン全体を ConditionBlock IR ノードに変換する。"""
     if profile.elif_structure == "nested":
-        cases = _collect_all_cases_nested(if_node)
+        cases = _collect_all_cases_nested(if_node, profile)
     else:
-        cases = _collect_all_cases_flat(if_node)
+        cases = _collect_all_cases_flat(if_node, profile)
 
     return ConditionBlock(
         kind="ConditionBlock",
@@ -375,7 +401,7 @@ def _map_if_to_condition_block(if_node: Node, profile: LanguageProfile) -> Condi
 
 
 # ---------------------------------------------------------------------------
-# マッピング: for ループ → LoopNode IR
+# マッピング: for ループ → LoopNode IR（TypeScript / Python 共通）
 # ---------------------------------------------------------------------------
 
 
@@ -450,7 +476,114 @@ def _map_for_range_to_loop(for_node: Node, profile: LanguageProfile) -> LoopNode
 
 
 # ---------------------------------------------------------------------------
+# マッピング: for ループ → LoopNode IR（Go 専用）
+# ---------------------------------------------------------------------------
+
+
+def _has_range_clause(for_node: Node) -> bool:
+    """Go: for_statement が range_clause を持つか（for...range ループ）。"""
+    return _has_child_of_type(for_node, "range_clause")
+
+
+def _has_for_clause(for_node: Node) -> bool:
+    """Go: for_statement が for_clause を持つか（C スタイルループ）。"""
+    return _has_child_of_type(for_node, "for_clause")
+
+
+def _extract_go_range_iterator(range_clause: Node) -> str:
+    """
+    Go の range_clause から iterator 変数テキストを返す。
+
+    range_clause の構造:
+        expression_list (variables) := range collection
+    named_children[0] = expression_list（左辺の変数群: "_, item" 等）
+    """
+    left_node = range_clause.named_children[0] if range_clause.named_children else None
+    if left_node is None:
+        return "item"
+    return _extract_node_text(left_node).strip()
+
+
+def _extract_go_range_collection(range_clause: Node) -> str:
+    """
+    Go の range_clause からコレクション式テキストを返す。
+
+    named_children の最後が range 対象（right 側）になる。
+    """
+    children = range_clause.named_children
+    if len(children) < 2:
+        return ""
+    return _extract_node_text(children[-1]).strip()
+
+
+def _map_go_for_each_to_loop(for_node: Node, profile: LanguageProfile) -> LoopNode:
+    """Go の for...range 文を LoopNode IR（FOR_EACH）に変換する。"""
+    range_clause = next(
+        (c for c in for_node.named_children if c.type == "range_clause"),
+        None,
+    )
+    iterator = _extract_go_range_iterator(range_clause) if range_clause is not None else "item"
+    collection = _extract_go_range_collection(range_clause) if range_clause is not None else ""
+
+    body_node = for_node.child_by_field_name("body")
+    nested_body = _extract_body_ir_nodes(body_node, profile) if body_node is not None else []
+
+    return LoopNode(
+        kind="Loop",
+        loop_type="FOR_EACH",
+        collection=collection,
+        iterator=iterator,
+        body=tuple(nested_body),
+    )
+
+
+def _extract_go_for_clause_summary(for_clause: Node) -> str:
+    """Go の for_clause サマリーを 'init; condition; update' 形式で返す。"""
+    parts = [_extract_node_text(c).strip() for c in for_clause.named_children]
+    return "; ".join(parts)
+
+
+def _extract_go_for_clause_iterator(for_clause: Node) -> str:
+    """Go の for_clause の初期化文からカウンタ変数名を返す。"""
+    if not for_clause.named_children:
+        return "i"
+    init_node = for_clause.named_children[0]
+    if init_node.type == "short_var_declaration":
+        left_node = init_node.named_children[0] if init_node.named_children else None
+        if left_node is not None:
+            first_id = next(
+                (c for c in left_node.named_children if c.type == "identifier"),
+                None,
+            )
+            if first_id is not None:
+                return _extract_node_text(first_id)
+    return "i"
+
+
+def _map_go_for_range_to_loop(for_node: Node, profile: LanguageProfile) -> LoopNode:
+    """Go の C スタイル for 文を LoopNode IR（FOR_RANGE）に変換する。"""
+    for_clause = next(
+        (c for c in for_node.named_children if c.type == "for_clause"),
+        None,
+    )
+    body_node = for_node.child_by_field_name("body")
+    nested_body = _extract_body_ir_nodes(body_node, profile) if body_node is not None else []
+
+    collection = _extract_go_for_clause_summary(for_clause) if for_clause is not None else ""
+    iterator = _extract_go_for_clause_iterator(for_clause) if for_clause is not None else "i"
+
+    return LoopNode(
+        kind="Loop",
+        loop_type="FOR_RANGE",
+        collection=collection,
+        iterator=iterator,
+        body=tuple(nested_body),
+    )
+
+
+# ---------------------------------------------------------------------------
 # マッピング: expression_statement → DataTransformation / SideEffect IR
+# （TypeScript / Python 共通）
 # ---------------------------------------------------------------------------
 
 _AUGMENTED_ASSIGNMENT_OPERATIONS: dict[str, str] = {
@@ -515,7 +648,7 @@ def _map_call_to_ir(expr_node: Node) -> SideEffect:
     関数呼び出し式を SideEffect IR ノードに変換する。
     TypeScript: call_expression
     Python:     call
-    （フィールド名 function / arguments は両言語で共通）
+    Go:         call_expression（expression_statement 内）
     """
     return SideEffect(
         kind="SideEffect",
@@ -576,6 +709,107 @@ def _map_lexical_declaration_to_ir(stmt_node: Node) -> Optional[IRNode]:
 
 
 # ---------------------------------------------------------------------------
+# マッピング: Go 専用の代入文 → DataTransformation IR
+# ---------------------------------------------------------------------------
+
+
+def _map_go_assignment_to_ir(stmt_node: Node) -> Optional[DataTransformation]:
+    """
+    Go の assignment_statement（x = y, x += y, x -= y 等）を
+    DataTransformation IR ノードに変換する。
+
+    構造:
+        expression_list  +=|-=|=  expression_list
+    named_children[0] = 左辺 expression_list
+    named_children[-1] = 右辺 expression_list
+    演算子は non-named child として埋め込まれている。
+    """
+    named = stmt_node.named_children
+    if len(named) < 2:
+        return None
+
+    left_node = named[0]
+    right_node = named[-1]
+
+    # 演算子は非名前付き子ノードから取得
+    op_text = "="
+    for c in stmt_node.children:
+        if not c.is_named and c.text:
+            txt = c.text.decode()
+            if txt in _AUGMENTED_ASSIGNMENT_OPERATIONS or txt == "=":
+                op_text = txt
+                break
+
+    target = _extract_node_text(left_node).strip()
+    value = _extract_node_text(right_node).strip()
+    operation = _AUGMENTED_ASSIGNMENT_OPERATIONS.get(op_text, "ASSIGN")
+
+    return DataTransformation(
+        kind="DataTransformation",
+        target=target,
+        operation=operation,
+        value=value,
+    )
+
+
+def _map_go_short_var_decl_to_ir(stmt_node: Node) -> Optional[DataTransformation]:
+    """
+    Go の short_var_declaration（x := y）を DataTransformation（ASSIGN）IR に変換する。
+
+    構造:
+        expression_list  :=  expression_list
+    named_children[0] = 左辺 expression_list（変数名）
+    named_children[-1] = 右辺 expression_list（初期値）
+    """
+    named = stmt_node.named_children
+    if len(named) < 2:
+        return None
+
+    left_node = named[0]
+    right_node = named[-1]
+
+    target = _extract_node_text(left_node).strip()
+    value = _extract_node_text(right_node).strip()
+
+    return DataTransformation(
+        kind="DataTransformation",
+        target=target,
+        operation="ASSIGN",
+        value=value,
+    )
+
+
+def _map_go_var_decl_to_ir(stmt_node: Node) -> Optional[DataTransformation]:
+    """
+    Go の var_declaration（関数内の var x = y）を DataTransformation（ASSIGN）IR に変換する。
+
+    var_declaration → var_spec → name / value フィールド
+    """
+    spec_node = next(
+        (c for c in stmt_node.named_children if c.type == "var_spec"),
+        None,
+    )
+    if spec_node is None:
+        return None
+
+    name_node = spec_node.child_by_field_name("name")
+    value_node = spec_node.child_by_field_name("value")
+
+    if name_node is None or value_node is None:
+        return None
+
+    target = _extract_node_text(name_node).strip()
+    value = _extract_node_text(value_node).strip()
+
+    return DataTransformation(
+        kind="DataTransformation",
+        target=target,
+        operation="ASSIGN",
+        value=value,
+    )
+
+
+# ---------------------------------------------------------------------------
 # ディスパッチ: 1つの文ノード → Optional[IRNode]
 # ---------------------------------------------------------------------------
 
@@ -587,11 +821,14 @@ def _map_statement_to_ir(
     1つの文ASTノードを profile を参照して適切な IR ノードに変換する。
 
     対応する文タイプ（profile によって異なる）:
-    - if_statement                          → GuardClause または ConditionBlock
-    - for_each_node_type (of / in)          → LoopNode (FOR_EACH)
-    - for_range_node_type (TypeScript のみ) → LoopNode (FOR_RANGE)
-    - expression_statement                 → DataTransformation または SideEffect
-    - lexical_declaration_types (TS のみ)  → DataTransformation
+    - if_statement                               → GuardClause または ConditionBlock
+    - for_each_node_type (TS: of / Py: in / Go: range_clause) → LoopNode (FOR_EACH)
+    - for_range_node_type (TS のみ / Go は for_each と共用)    → LoopNode (FOR_RANGE)
+    - expression_statement                       → DataTransformation または SideEffect
+    - lexical_declaration_types (TS のみ)        → DataTransformation
+    - assignment_statement (Go のみ)             → DataTransformation
+    - short_var_declaration (Go のみ)            → DataTransformation
+    - var_declaration (Go のみ)                  → DataTransformation
 
     変換後、直前の comment ノードがあれば IR ノードの comment フィールドに付与する。
     """
@@ -600,15 +837,23 @@ def _map_statement_to_ir(
 
     if node_type == "if_statement":
         if _is_guard_clause(statement_node, profile):
-            ir_node = _map_if_to_guard_clause(statement_node)
+            ir_node = _map_if_to_guard_clause(statement_node, profile)
         else:
             ir_node = _map_if_to_condition_block(statement_node, profile)
 
     elif node_type == profile.for_each_node_type:
-        # TypeScript: for_in_statement は for...in / for...of 両方を含むため確認が必要
         if profile.name == "typescript" and not _is_for_of(statement_node):
             return None  # for...in はスコープ外（Phase 1 定義）
-        ir_node = _map_for_each_to_loop(statement_node, profile)
+        elif profile.name == "go":
+            # Go は for_statement が range / C スタイル / 無限ループを兼ねる
+            if _has_range_clause(statement_node):
+                ir_node = _map_go_for_each_to_loop(statement_node, profile)
+            elif _has_for_clause(statement_node):
+                ir_node = _map_go_for_range_to_loop(statement_node, profile)
+            else:
+                return None  # 無限ループ・while スタイルは対象外
+        else:
+            ir_node = _map_for_each_to_loop(statement_node, profile)
 
     elif profile.for_range_node_type and node_type == profile.for_range_node_type:
         ir_node = _map_for_range_to_loop(statement_node, profile)
@@ -618,6 +863,16 @@ def _map_statement_to_ir(
 
     elif node_type in profile.lexical_declaration_types:
         ir_node = _map_lexical_declaration_to_ir(statement_node)
+
+    # --- Go 専用の直接代入文 ---
+    elif profile.name == "go" and node_type == "assignment_statement":
+        ir_node = _map_go_assignment_to_ir(statement_node)
+
+    elif profile.name == "go" and node_type == "short_var_declaration":
+        ir_node = _map_go_short_var_decl_to_ir(statement_node)
+
+    elif profile.name == "go" and node_type == "var_declaration":
+        ir_node = _map_go_var_decl_to_ir(statement_node)
 
     if ir_node is None:
         return None
@@ -638,9 +893,11 @@ def _extract_body_ir_nodes(body_node: Node, profile: LanguageProfile) -> list[IR
     """
     ブロックノード（statement_block / block）から、
     マッピング可能な IRNode の一覧を返す。
+
+    _get_block_statements を使うことで Go の statement_list 二段構造を吸収する。
     """
     results: list[IRNode] = []
-    for statement in body_node.named_children:
+    for statement in _get_block_statements(body_node, profile):
         ir_node = _map_statement_to_ir(statement, profile)
         if ir_node is not None:
             results.append(ir_node)
@@ -676,7 +933,7 @@ def _map_function_to_spec(fn_node: Node, profile: LanguageProfile) -> FunctionSp
 
 
 # ---------------------------------------------------------------------------
-# モジュールレベルの抽出: インポート / 変数定義 / 型定義
+# モジュールレベルの抽出: インポート
 # ---------------------------------------------------------------------------
 
 
@@ -733,22 +990,8 @@ def _extract_py_import(import_node: Node) -> Optional[ImportSpec]:
     """
     Python の import_statement / import_from_statement / future_import_statement
     ノードから ImportSpec を生成する。
-
-    import_statement:
-      import os                → source_module="os", names=()
-      import numpy as np       → source_module="numpy", alias="np"
-
-    import_from_statement:
-      from datetime import datetime     → source_module="datetime", names=("datetime",)
-      from typing import Optional, List → source_module="typing", names=("Optional", "List")
-      from . import utils               → source_module=".", names=("utils",)
-
-    future_import_statement:
-      from __future__ import annotations → source_module="__future__", names=("annotations",)
     """
     if import_node.type == "future_import_statement":
-        # from __future__ import X の専用ノードタイプ
-        # named_children は dotted_name のみ（ソース名 "__future__" は暗黙）
         imported_names = tuple(
             _extract_node_text(child)
             for child in import_node.named_children
@@ -761,7 +1004,6 @@ def _extract_py_import(import_node: Node) -> Optional[ImportSpec]:
             alias="",
         )
     if import_node.type == "import_statement":
-        # import os  /  import numpy as np
         for child in import_node.named_children:
             if child.type == "dotted_name":
                 return ImportSpec(
@@ -784,19 +1026,14 @@ def _extract_py_import(import_node: Node) -> Optional[ImportSpec]:
         return None
 
     if import_node.type == "import_from_statement":
-        # from <module> import <names>
         named = import_node.named_children
         if not named:
             return None
-
-        # 最初の named child がソースモジュール（dotted_name か relative_import）
         first = named[0]
         if first.type == "relative_import":
             source_module = _extract_node_text(first)
         else:
             source_module = _extract_node_text(first)
-
-        # 残りの named children がインポートした名前（dotted_name のリスト）
         imported_names = tuple(
             _extract_node_text(child)
             for child in named[1:]
@@ -812,6 +1049,63 @@ def _extract_py_import(import_node: Node) -> Optional[ImportSpec]:
     return None
 
 
+def _extract_go_import_spec(spec_node: Node) -> Optional[ImportSpec]:
+    """
+    Go の import_spec ノードから ImportSpec を生成する。
+
+    import_spec の構造:
+        [name: package_identifier]  path: interpreted_string_literal
+    path フィールドの内部コンテンツノードからモジュール名を取得する。
+    """
+    path_node = spec_node.child_by_field_name("path")
+    name_node = spec_node.child_by_field_name("name")
+
+    if path_node is None:
+        return None
+
+    # interpreted_string_literal の内部コンテンツノードを探す
+    content_node = next(
+        (c for c in path_node.named_children if "content" in c.type),
+        None,
+    )
+    if content_node is not None:
+        module_name = _extract_node_text(content_node)
+    else:
+        # フォールバック: リテラル全体から引用符を除去
+        module_name = _extract_node_text(path_node).strip('"')
+
+    alias = _extract_node_text(name_node).strip() if name_node is not None else ""
+
+    return ImportSpec(
+        kind="ImportSpec",
+        source_module=module_name,
+        imported_names=(),
+        alias=alias,
+    )
+
+
+def _extract_go_imports(import_node: Node) -> list[ImportSpec]:
+    """
+    Go の import_declaration（単一 / グループ）から ImportSpec リストを生成する。
+
+    単一: import_declaration → import_spec
+    グループ: import_declaration → import_spec_list → import_spec*
+    """
+    results: list[ImportSpec] = []
+    for child in import_node.named_children:
+        if child.type == "import_spec":
+            spec = _extract_go_import_spec(child)
+            if spec is not None:
+                results.append(spec)
+        elif child.type == "import_spec_list":
+            for spec_node in child.named_children:
+                if spec_node.type == "import_spec":
+                    spec = _extract_go_import_spec(spec_node)
+                    if spec is not None:
+                        results.append(spec)
+    return results
+
+
 def _extract_all_imports(
     root_node: Node, profile: LanguageProfile
 ) -> tuple[ImportSpec, ...]:
@@ -822,11 +1116,21 @@ def _extract_all_imports(
             continue
         if profile.name == "typescript":
             spec = _extract_ts_import(child)
+            if spec is not None:
+                results.append(spec)
+        elif profile.name == "go":
+            # Go は1 import_declaration に複数 spec が含まれる場合がある
+            results.extend(_extract_go_imports(child))
         else:
             spec = _extract_py_import(child)
-        if spec is not None:
-            results.append(spec)
+            if spec is not None:
+                results.append(spec)
     return tuple(results)
+
+
+# ---------------------------------------------------------------------------
+# モジュールレベルの抽出: 変数・定数定義
+# ---------------------------------------------------------------------------
 
 
 def _extract_ts_module_variable(node: Node) -> Optional[ModuleVariableSpec]:
@@ -834,7 +1138,6 @@ def _extract_ts_module_variable(node: Node) -> Optional[ModuleVariableSpec]:
     TypeScript トップレベルの lexical_declaration（const/let）から
     ModuleVariableSpec を生成する。
     """
-    # const/let キーワードで定数かどうかを判定
     is_constant = any(
         child.type == "const" or _extract_node_text(child) == "const"
         for child in node.children
@@ -870,7 +1173,6 @@ def _extract_py_module_variable(node: Node) -> Optional[ModuleVariableSpec]:
     Python トップレベルの expression_statement 内の assignment から
     ModuleVariableSpec を生成する。
     """
-    # expression_statement の中の assignment を取り出す
     assignment = next(
         (c for c in node.named_children if c.type == "assignment"),
         None,
@@ -885,13 +1187,45 @@ def _extract_py_module_variable(node: Node) -> Optional[ModuleVariableSpec]:
         return None
 
     name = _extract_node_text(left_node).strip()
-    # 複数変数への代入（タプルアンパック）は除外
     if "," in name:
         return None
 
     value_text = _truncate_text(_extract_node_text(right_node))
-    # Python では ALL_CAPS 命名を定数と判定する
     is_constant = name.isupper() or (name.replace("_", "").isupper() and "_" in name)
+
+    return ModuleVariableSpec(
+        kind="ModuleVariableSpec",
+        name=name,
+        value_text=value_text,
+        is_constant=is_constant,
+    )
+
+
+def _extract_go_module_variable(node: Node) -> Optional[ModuleVariableSpec]:
+    """
+    Go トップレベルの var_declaration / const_declaration から ModuleVariableSpec を生成する。
+
+    var_declaration   → var_spec   → name / value フィールド
+    const_declaration → const_spec → name / value フィールド
+    """
+    is_constant = node.type == "const_declaration"
+    spec_type = "const_spec" if is_constant else "var_spec"
+
+    spec_node = next(
+        (c for c in node.named_children if c.type == spec_type),
+        None,
+    )
+    if spec_node is None:
+        return None
+
+    name_node = spec_node.child_by_field_name("name")
+    value_node = spec_node.child_by_field_name("value")
+
+    if name_node is None or value_node is None:
+        return None
+
+    name = _extract_node_text(name_node).strip()
+    value_text = _truncate_text(_extract_node_text(value_node))
 
     return ModuleVariableSpec(
         kind="ModuleVariableSpec",
@@ -911,11 +1245,18 @@ def _extract_all_module_variables(
             continue
         if profile.name == "typescript":
             spec = _extract_ts_module_variable(child)
+        elif profile.name == "go":
+            spec = _extract_go_module_variable(child)
         else:
             spec = _extract_py_module_variable(child)
         if spec is not None:
             results.append(spec)
     return tuple(results)
+
+
+# ---------------------------------------------------------------------------
+# モジュールレベルの抽出: 型定義（TypeScript のみ）
+# ---------------------------------------------------------------------------
 
 
 def _extract_ts_type_definition(node: Node) -> Optional[TypeDefinitionSpec]:
@@ -933,7 +1274,6 @@ def _extract_ts_type_definition(node: Node) -> Optional[TypeDefinitionSpec]:
     name = _extract_node_text(name_node).strip()
 
     if node.type == "type_alias_declaration":
-        # type UserId = string; → name のあとの型本体を取得
         type_body_node = next(
             (c for c in node.named_children if c.type != "type_identifier"),
             None,

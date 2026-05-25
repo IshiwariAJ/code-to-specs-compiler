@@ -212,5 +212,108 @@ class TestSupportedExtensions:
     def test_py_is_supported(self):
         assert ".py" in get_supported_extensions()
 
+    def test_go_is_supported(self):
+        assert ".go" in get_supported_extensions()
+
     def test_returns_frozenset(self):
         assert isinstance(get_supported_extensions(), frozenset)
+
+
+# ---------------------------------------------------------------------------
+# Go 言語 E2E テスト
+# ---------------------------------------------------------------------------
+
+_GO_SOURCE = (
+    "package main\n"
+    'import "fmt"\n'
+    "const MAX = 100\n"
+    "// calculateBenefit は特典を計算する\n"
+    "func calculateBenefit(user User) int {\n"
+    '  if user.Status != "ACTIVE" {\n'
+    "    return 0\n"
+    "  }\n"
+    "  total := 0\n"
+    "  for _, h := range user.History {\n"
+    "    total += h.Price\n"
+    "  }\n"
+    "  if total >= 100000 {\n"
+    "    return 1000\n"
+    "  } else {\n"
+    "    return 100\n"
+    "  }\n"
+    "}\n"
+)
+
+
+class TestGoE2E:
+    """Go ソースコードの E2E 変換テスト"""
+
+    def test_go_compiles_without_error(self):
+        result = compile_to_spec(_GO_SOURCE, "test", ".go")
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_go_output_contains_module_header(self):
+        result = compile_to_spec(_GO_SOURCE, "test", ".go")
+        assert "# モジュール仕様: test" in result
+
+    def test_go_output_contains_import_section(self):
+        result = compile_to_spec(_GO_SOURCE, "test", ".go")
+        assert "依存関係" in result
+        assert "fmt" in result
+
+    def test_go_output_contains_module_constant(self):
+        result = compile_to_spec(_GO_SOURCE, "test", ".go")
+        assert "MAX" in result
+        assert "100" in result
+
+    def test_go_output_contains_function_name(self):
+        result = compile_to_spec(_GO_SOURCE, "test", ".go")
+        assert "calculateBenefit" in result
+
+    def test_go_output_contains_guard_clause(self):
+        result = compile_to_spec(_GO_SOURCE, "test", ".go")
+        assert "前提条件（ガード句）" in result
+
+    def test_go_output_contains_for_each_loop(self):
+        result = compile_to_spec(_GO_SOURCE, "test", ".go")
+        assert "繰り返し処理" in result
+
+    def test_go_output_contains_condition_block(self):
+        result = compile_to_spec(_GO_SOURCE, "test", ".go")
+        assert "条件分岐" in result
+
+    def test_go_output_contains_data_transformation(self):
+        result = compile_to_spec(_GO_SOURCE, "test", ".go")
+        assert "データ変換" in result
+
+    def test_go_output_contains_function_description(self):
+        result = compile_to_spec(_GO_SOURCE, "test", ".go")
+        assert "calculateBenefit は特典を計算する" in result
+
+    def test_go_same_structural_markers_as_typescript(self):
+        """Go と TypeScript が同一の構造マーカーを出力することを確認（Universal IR の実証）"""
+        go_result = compile_to_spec(_GO_SOURCE, "test", ".go")
+        ts_source = (
+            "function calculateBenefit(user) {\n"
+            '  if (user.status !== "ACTIVE") { return 0; }\n'
+            "  let total = 0;\n"
+            "  for (const h of user.history) { total += h.price; }\n"
+            "  if (total >= 100000) { return 1000; } else { return 100; }\n"
+            "}\n"
+        )
+        ts_result = compile_to_spec(ts_source, "test", ".ts")
+        for marker in ["前提条件（ガード句）", "繰り返し処理", "条件分岐", "データ変換"]:
+            assert marker in go_result, f"Go 出力に {marker} がない"
+            assert marker in ts_result, f"TS 出力に {marker} がない"
+
+    def test_go_c_style_for_loop(self):
+        src = (
+            "package main\n"
+            "func countUp(n int) {\n"
+            "  for i := 0; i < n; i++ {\n"
+            "  }\n"
+            "}\n"
+        )
+        result = compile_to_spec(src, "test", ".go")
+        assert "繰り返し処理" in result

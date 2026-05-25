@@ -9,7 +9,7 @@ mapper.py のユニットテスト
 import pytest
 
 from src.ir.mapper import map_source_to_module_spec
-from src.ir.profiles import PYTHON_PROFILE, TYPESCRIPT_PROFILE
+from src.ir.profiles import GO_PROFILE, PYTHON_PROFILE, TYPESCRIPT_PROFILE
 from src.ir.types import (
     ConditionBlock,
     DataTransformation,
@@ -22,6 +22,7 @@ from src.ir.types import (
     SideEffect,
     TypeDefinitionSpec,
 )
+from src.parser.go_parser import parse_go_source
 from src.parser.python_parser import parse_python_source
 from src.parser.ts_parser import parse_typescript_source
 
@@ -41,6 +42,12 @@ def _py_module(source: str) -> ModuleSpec:
     """Python スニペットを解析して ModuleSpec を返す純粋ヘルパー。"""
     root = parse_python_source(source)
     return map_source_to_module_spec(root, "test", PYTHON_PROFILE)
+
+
+def _go_module(source: str) -> ModuleSpec:
+    """Go スニペットを解析して ModuleSpec を返す純粋ヘルパー。"""
+    root = parse_go_source(source)
+    return map_source_to_module_spec(root, "test", GO_PROFILE)
 
 
 def _ts_body(source: str) -> tuple:
@@ -683,3 +690,431 @@ class TestCommentExtraction:
         assert isinstance(guard, GuardClause)
         # Python の関数内インラインコメントは非対応（tree-sitter 制約）
         assert guard.comment == ""
+
+
+# ---------------------------------------------------------------------------
+# Go 言語対応テスト
+# ---------------------------------------------------------------------------
+
+
+def _go_body(source: str) -> tuple:
+    """Go スニペットの最初の関数の IR ノード列を返す。"""
+    return _go_module(source).functions[0].body
+
+
+class TestGoGuardClause:
+    """Go のガード句検出テスト"""
+
+    def test_go_guard_clause_detected(self):
+        src = (
+            "package main\n"
+            "func f(x int) int {\n"
+            "  if x < 0 {\n"
+            "    return 0\n"
+            "  }\n"
+            "  return x\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert isinstance(body[0], GuardClause)
+
+    def test_go_guard_clause_condition(self):
+        src = (
+            "package main\n"
+            "func f(x int) int {\n"
+            '  if x != 0 {\n'
+            "    return -1\n"
+            "  }\n"
+            "  return 0\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert body[0].condition_text == "x != 0"
+
+    def test_go_guard_clause_action_text(self):
+        src = (
+            "package main\n"
+            "func f(x int) int {\n"
+            "  if x < 0 {\n"
+            "    return 0\n"
+            "  }\n"
+            "  return x\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert "処理を終了する" in body[0].action_text
+
+    def test_go_if_with_else_is_not_guard_clause(self):
+        src = (
+            "package main\n"
+            "func f(x int) int {\n"
+            "  if x > 0 {\n"
+            "    return 1\n"
+            "  } else {\n"
+            "    return -1\n"
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert isinstance(body[0], ConditionBlock)
+
+
+class TestGoLoopNode:
+    """Go の for ループ検出テスト"""
+
+    def test_go_for_range_is_for_each(self):
+        src = (
+            "package main\n"
+            "func f(items []int) {\n"
+            "  for _, item := range items {\n"
+            "    _ = item\n"
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert isinstance(body[0], LoopNode)
+        assert body[0].loop_type == "FOR_EACH"
+
+    def test_go_for_range_collection(self):
+        src = (
+            "package main\n"
+            "func f(items []int) {\n"
+            "  for _, v := range items {\n"
+            "    _ = v\n"
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert body[0].collection == "items"
+
+    def test_go_for_range_iterator_includes_variables(self):
+        src = (
+            "package main\n"
+            "func f(items []int) {\n"
+            "  for _, v := range items {\n"
+            "    _ = v\n"
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        # iterator は "_, v" のような expression_list テキスト
+        assert "v" in body[0].iterator
+
+    def test_go_c_style_for_is_for_range(self):
+        src = (
+            "package main\n"
+            "func f() {\n"
+            "  for i := 0; i < 10; i++ {\n"
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert isinstance(body[0], LoopNode)
+        assert body[0].loop_type == "FOR_RANGE"
+
+    def test_go_c_style_for_iterator_name(self):
+        src = (
+            "package main\n"
+            "func f() {\n"
+            "  for i := 0; i < 10; i++ {\n"
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert body[0].iterator == "i"
+
+    def test_go_for_range_body_extracted(self):
+        src = (
+            "package main\n"
+            "func f(items []int) {\n"
+            "  total := 0\n"
+            "  for _, v := range items {\n"
+            "    total += v\n"
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        loop = body[1]
+        assert isinstance(loop, LoopNode)
+        assert len(loop.body) == 1
+        assert isinstance(loop.body[0], DataTransformation)
+        assert loop.body[0].operation == "ADD"
+
+
+class TestGoDataTransformation:
+    """Go の代入・変数宣言の DataTransformation テスト"""
+
+    def test_go_short_var_decl_is_data_transformation(self):
+        src = (
+            "package main\n"
+            "func f() {\n"
+            "  x := 42\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert isinstance(body[0], DataTransformation)
+        assert body[0].operation == "ASSIGN"
+
+    def test_go_short_var_decl_target(self):
+        src = (
+            "package main\n"
+            "func f() {\n"
+            "  total := 0\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert body[0].target == "total"
+
+    def test_go_short_var_decl_value(self):
+        src = (
+            "package main\n"
+            "func f() {\n"
+            "  total := 0\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert body[0].value == "0"
+
+    def test_go_augmented_assignment_add(self):
+        src = (
+            "package main\n"
+            "func f() {\n"
+            "  total := 0\n"
+            "  total += 5\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert isinstance(body[1], DataTransformation)
+        assert body[1].operation == "ADD"
+
+    def test_go_augmented_assignment_subtract(self):
+        src = (
+            "package main\n"
+            "func f() {\n"
+            "  x := 10\n"
+            "  x -= 3\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert body[1].operation == "SUBTRACT"
+
+    def test_go_simple_assignment(self):
+        src = (
+            "package main\n"
+            "func f() {\n"
+            "  x := 0\n"
+            "  x = 5\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert isinstance(body[1], DataTransformation)
+        assert body[1].operation == "ASSIGN"
+
+
+class TestGoConditionBlock:
+    """Go の if/else-if/else 条件分岐テスト"""
+
+    def test_go_if_else_is_condition_block(self):
+        src = (
+            "package main\n"
+            "func f(x int) int {\n"
+            "  if x > 0 {\n"
+            "    return 1\n"
+            "  } else {\n"
+            "    return -1\n"
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert isinstance(body[0], ConditionBlock)
+
+    def test_go_if_else_has_two_cases(self):
+        src = (
+            "package main\n"
+            "func f(x int) int {\n"
+            "  if x > 0 {\n"
+            "    return 1\n"
+            "  } else {\n"
+            "    return -1\n"
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert len(body[0].cases) == 2
+
+    def test_go_else_if_chain_has_three_cases(self):
+        src = (
+            "package main\n"
+            "func f(x int) string {\n"
+            '  if x > 100 {\n'
+            '    return "big"\n'
+            "  } else if x > 50 {\n"
+            '    return "medium"\n'
+            "  } else {\n"
+            '    return "small"\n'
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert isinstance(body[0], ConditionBlock)
+        assert len(body[0].cases) == 3
+
+    def test_go_condition_text_no_outer_parens(self):
+        src = (
+            "package main\n"
+            "func f(x int) int {\n"
+            "  if x > 0 {\n"
+            "    return 1\n"
+            "  } else {\n"
+            "    return -1\n"
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        # Go の条件式には外側の括弧がない
+        assert body[0].cases[0].condition_text == "x > 0"
+
+    def test_go_else_case_has_default_condition(self):
+        src = (
+            "package main\n"
+            "func f(x int) int {\n"
+            "  if x > 0 {\n"
+            "    return 1\n"
+            "  } else {\n"
+            "    return -1\n"
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        assert "デフォルト" in body[0].cases[1].condition_text
+
+
+class TestGoImports:
+    """Go のインポート抽出テスト"""
+
+    def test_go_single_import_detected(self):
+        src = (
+            'package main\nimport "fmt"\nfunc f() {}\n'
+        )
+        spec = _go_module(src)
+        assert len(spec.imports) == 1
+
+    def test_go_single_import_module_name(self):
+        src = (
+            'package main\nimport "fmt"\nfunc f() {}\n'
+        )
+        spec = _go_module(src)
+        assert spec.imports[0].source_module == "fmt"
+
+    def test_go_group_import_two_packages(self):
+        src = (
+            "package main\n"
+            "import (\n"
+            '    "fmt"\n'
+            '    "os"\n'
+            ")\n"
+            "func f() {}\n"
+        )
+        spec = _go_module(src)
+        assert len(spec.imports) == 2
+
+    def test_go_group_import_module_names(self):
+        src = (
+            "package main\n"
+            "import (\n"
+            '    "fmt"\n'
+            '    "os"\n'
+            ")\n"
+            "func f() {}\n"
+        )
+        spec = _go_module(src)
+        modules = {s.source_module for s in spec.imports}
+        assert "fmt" in modules
+        assert "os" in modules
+
+    def test_go_aliased_import(self):
+        src = (
+            "package main\n"
+            'import os "os"\n'
+            "func f() {}\n"
+        )
+        spec = _go_module(src)
+        assert spec.imports[0].alias == "os"
+
+
+class TestGoModuleVariables:
+    """Go のモジュールレベル定数・変数テスト"""
+
+    def test_go_const_is_constant(self):
+        src = (
+            "package main\n"
+            'const VERSION = "1.0"\n'
+            "func f() {}\n"
+        )
+        spec = _go_module(src)
+        assert len(spec.module_variables) == 1
+        assert spec.module_variables[0].is_constant is True
+
+    def test_go_const_name(self):
+        src = (
+            "package main\n"
+            "const MAX_SIZE = 100\n"
+            "func f() {}\n"
+        )
+        spec = _go_module(src)
+        assert spec.module_variables[0].name == "MAX_SIZE"
+
+    def test_go_var_is_not_constant(self):
+        src = (
+            "package main\n"
+            "var counter = 0\n"
+            "func f() {}\n"
+        )
+        spec = _go_module(src)
+        assert spec.module_variables[0].is_constant is False
+
+    def test_go_var_name_and_value(self):
+        src = (
+            "package main\n"
+            "var maxRetry = 3\n"
+            "func f() {}\n"
+        )
+        spec = _go_module(src)
+        assert spec.module_variables[0].name == "maxRetry"
+        assert spec.module_variables[0].value_text == "3"
+
+
+class TestGoFunctionSpec:
+    """Go の関数仕様全般テスト"""
+
+    def test_go_function_name_extracted(self):
+        src = "package main\nfunc myFunc() {}\n"
+        spec = _go_module(src)
+        assert spec.functions[0].name == "myFunc"
+
+    def test_go_function_comment_as_description(self):
+        src = (
+            "package main\n"
+            "// myFunc は何かをする\n"
+            "func myFunc() {}\n"
+        )
+        spec = _go_module(src)
+        assert "myFunc は何かをする" in spec.functions[0].description
+
+    def test_go_multiple_functions_detected(self):
+        src = (
+            "package main\n"
+            "func f1() {}\n"
+            "func f2() {}\n"
+        )
+        spec = _go_module(src)
+        assert len(spec.functions) == 2
+
+    def test_go_file_header_comment_extracted(self):
+        src = (
+            "// Package main はサンプルです\n"
+            "package main\n"
+            "func f() {}\n"
+        )
+        spec = _go_module(src)
+        assert "サンプルです" in spec.file_comment

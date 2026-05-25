@@ -12,7 +12,8 @@
 from tree_sitter import Node
 
 from src.ir.mapper import map_source_to_module_spec
-from src.ir.profiles import PYTHON_PROFILE, TYPESCRIPT_PROFILE, LanguageProfile
+from src.ir.profiles import GO_PROFILE, PYTHON_PROFILE, TYPESCRIPT_PROFILE, LanguageProfile
+from src.parser.go_parser import parse_go_source
 from src.parser.python_parser import parse_python_source
 from src.parser.ts_parser import parse_typescript_source
 from src.renderer.markdown import render_module_spec
@@ -28,6 +29,7 @@ _LANGUAGE_CONFIGS: dict[str, tuple] = {
     ".ts":  (parse_typescript_source, TYPESCRIPT_PROFILE),
     ".tsx": (parse_typescript_source, TYPESCRIPT_PROFILE),
     ".py":  (parse_python_source,     PYTHON_PROFILE),
+    ".go":  (parse_go_source,         GO_PROFILE),
 }
 
 _DEFAULT_EXTENSION = ".ts"

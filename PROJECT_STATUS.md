@@ -1,6 +1,6 @@
 # 自然言語コンパイラ — プロジェクト進捗管理
 
-最終更新: 2026-05-25（OSS 公開準備完了）
+最終更新: 2026-05-25（Phase 5A 完了: Go 対応）
 
 ---
 
@@ -13,7 +13,8 @@ Phase 2B ██████████ 完了     Python 対応: tree-sitter-py
 Phase 3  ██████████ 完了     テスト整備: 138件（test_batch を含む）
 Phase 4  ██████████ 完了     プロジェクト一括コンパイル（ディレクトリ再帰処理）
 Phase 4+ ██████████ 完了     コメント抽出（JSDoc/docstring/インライン）+ __future__ 対応 + OSS公開（Apache 2.0）
-Phase 5  ░░░░░░░░░░ 未着手   Go / Java 対応
+Phase 5A ██████████ 完了     Go 対応（for range / C スタイル for / := / assignment_statement）
+Phase 5B ░░░░░░░░░░ 未着手   Java 対応
 ```
 
 ---
