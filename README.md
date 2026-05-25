@@ -40,7 +40,7 @@ LLMは使用しません。[tree-sitter](https://tree-sitter.github.io/tree-sitt
 ### インストール
 
 ```bash
-git clone https://github.com/ToshikiIshiwari/code-to-specs-compiler.git
+git clone https://github.com/IshiwariAJ/code-to-specs-compiler.git
 cd code-to-specs-compiler
 pip install -r requirements.txt
 ```
@@ -225,7 +225,7 @@ It uses no LLMs — only compiler technology ([tree-sitter](https://tree-sitter.
 ### Installation
 
 ```bash
-git clone https://github.com/ToshikiIshiwari/code-to-specs-compiler.git
+git clone https://github.com/IshiwariAJ/code-to-specs-compiler.git
 cd code-to-specs-compiler
 pip install -r requirements.txt
 ```
