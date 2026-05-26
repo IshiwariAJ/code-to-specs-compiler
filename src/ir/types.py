@@ -13,6 +13,35 @@ from typing import Literal, Union
 
 
 # ---------------------------------------------------------------------------
+# 関数引数の仕様
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ParamSpec:
+    """
+    関数の1引数（パラメーター）の仕様。
+
+    例:
+        function foo(user: User, id: number = 0)
+            → ParamSpec(name="user", type_text="User")
+            → ParamSpec(name="id",   type_text="number", default_text="0")
+
+        def process(items: list[str], limit: int = 10) -> dict:
+            → ParamSpec(name="items", type_text="list[str]")
+            → ParamSpec(name="limit", type_text="int", default_text="10")
+
+        func Foo(a int, b string) (string, error)
+            → ParamSpec(name="a", type_text="int")
+            → ParamSpec(name="b", type_text="string")
+    """
+    name: str
+    type_text: str = ""       # 型アノテーション（なければ空文字）
+    default_text: str = ""    # デフォルト値テキスト（なければ空文字）
+    is_rest: bool = False     # TypeScript の ...args / Python の *args のような可変長引数
+
+
+# ---------------------------------------------------------------------------
 # モジュールレベルの構造（インポート / 変数定義 / 型定義）
 # ---------------------------------------------------------------------------
 
@@ -185,8 +214,29 @@ class SideEffect:
     comment: str = ""  # 直前のコメント行（生テキスト）
 
 
+@dataclass(frozen=True)
+class ReturnNode:
+    """
+    return / throw / raise 文（ガード句パターン以外のもの）。
+
+    ガード句（if (cond) { return/throw }）は GuardClause で表現されるため、
+    このノードは関数本体またはループ本体に直接現れる return/throw/raise を対象とする。
+
+    例:
+        return result                          → action="return", value_text="result"
+        return { points: 100, message: "..." } → action="return", value_text="{ points: 100, ... }"
+        throw new Error("msg")                 → action="throw",  value_text='new Error("msg")'
+        raise ValueError("msg")               → action="raise",  value_text='ValueError("msg")'
+        return                                 → action="return", value_text=""
+    """
+    kind: Literal["ReturnNode"]
+    value_text: str                                        # 返却・スローする式テキスト（値なし return は空文字）
+    action: Literal["return", "throw", "raise"] = "return"
+    comment: str = ""                                      # 直前のコメント行（生テキスト）
+
+
 # すべての関数本体 IR ノード型のユニオン型エイリアス
-IRNode = Union[GuardClause, ConditionBlock, LoopNode, DataTransformation, SideEffect]
+IRNode = Union[GuardClause, ConditionBlock, LoopNode, DataTransformation, SideEffect, ReturnNode]
 
 
 # ---------------------------------------------------------------------------
@@ -197,11 +247,13 @@ IRNode = Union[GuardClause, ConditionBlock, LoopNode, DataTransformation, SideEf
 @dataclass(frozen=True)
 class FunctionSpec:
     """
-    1つの関数の仕様: 関数名と、その本体から抽出したIRノードの列
+    1つの関数の仕様: 関数名、引数、戻り値の型、および本体から抽出したIRノードの列
     """
     name: str
     body: tuple[IRNode, ...]
-    description: str = ""  # JSDoc コメント（TypeScript）または docstring（Python）
+    description: str = ""               # JSDoc コメント（TypeScript）または docstring（Python）
+    params: tuple[ParamSpec, ...] = ()  # 引数リスト（順序保持）
+    return_type: str = ""               # 戻り値の型テキスト（型アノテーションがなければ空文字）
 
 
 @dataclass(frozen=True)

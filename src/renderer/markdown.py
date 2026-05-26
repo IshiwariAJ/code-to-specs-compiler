@@ -24,6 +24,8 @@ from src.ir.types import (
     LoopNode,
     ModuleSpec,
     ModuleVariableSpec,
+    ParamSpec,
+    ReturnNode,
     SideEffect,
     TypeDefinitionSpec,
 )
@@ -271,6 +273,67 @@ def _render_class_definitions_section(classes: tuple[ClassSpec, ...]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# レンダリング: 引数テーブル（FunctionSpec.params）
+# ---------------------------------------------------------------------------
+
+
+def _render_params_section(params: tuple[ParamSpec, ...]) -> str:
+    """引数リストをMarkdownテーブルに変換する。"""
+    lines = [
+        "**引数:**",
+        "",
+        "| 引数名 | 型 | デフォルト値 |",
+        "|---|---|---|",
+    ]
+    for p in params:
+        name_display = f"`...{p.name}`" if p.is_rest else f"`{p.name}`"
+        type_col     = f"`{p.type_text}`"    if p.type_text    else "—"
+        default_col  = f"`{p.default_text}`" if p.default_text else "—"
+        lines.append(f"| {name_display} | {type_col} | {default_col} |")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# レンダリング: ReturnNode
+# ---------------------------------------------------------------------------
+
+
+def _render_return_node(node: ReturnNode, index: int) -> str:
+    """
+    ReturnNode IR ノードを Markdown テキストに変換する。
+
+    - return: ↩️ 返却する / 処理を終了する（値なし）
+    - throw:  💥 例外をスローする
+    - raise:  💥 例外を raise する
+    - index > 0（関数本体の直下）: 番号付きセクションヘッダーを付ける
+    - index == 0（ループ本体等の入れ子）: 箇条書きのみ
+    """
+    comment_line = _render_comment_blockquote(node.comment)
+
+    if node.action == "return":
+        section_label = "↩️ 返却"
+        bullet = (
+            f"* ↩️ 返却する: `{node.value_text}`"
+            if node.value_text
+            else "* ↩️ 処理を終了する（値なし）"
+        )
+    elif node.action == "throw":
+        section_label = "💥 例外スロー"
+        bullet = f"* 💥 例外をスローする: `{node.value_text}`"
+    else:  # raise
+        section_label = "💥 例外 raise"
+        bullet = f"* 💥 例外を raise する: `{node.value_text}`"
+
+    if index > 0:
+        if comment_line:
+            return f"### {index}. {section_label}\n{comment_line}\n{bullet}"
+        return f"### {index}. {section_label}\n{bullet}"
+    if comment_line:
+        return f"{comment_line}\n{bullet}"
+    return bullet
+
+
+# ---------------------------------------------------------------------------
 # レンダリング: DataTransformation
 # ---------------------------------------------------------------------------
 
@@ -444,6 +507,9 @@ def _render_ir_node(node: IRNode, index: int) -> str:
     if isinstance(node, SideEffect):
         return _render_side_effect(node, index)
 
+    if isinstance(node, ReturnNode):
+        return _render_return_node(node, index)
+
     return ""
 
 
@@ -465,6 +531,16 @@ def _render_function_spec(spec: FunctionSpec) -> str:
         if comment_block:
             lines.append(comment_block)
             lines.append("")
+
+    # 引数テーブル
+    if spec.params:
+        lines.append(_render_params_section(spec.params))
+        lines.append("")
+
+    # 戻り値の型
+    if spec.return_type:
+        lines.append(f"**戻り値の型:** `{spec.return_type}`")
+        lines.append("")
 
     lines.extend(["### 📄 処理フロー", ""])
 

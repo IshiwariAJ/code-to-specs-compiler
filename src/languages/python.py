@@ -12,7 +12,7 @@ from tree_sitter import Node
 
 from ..ir.node_utils import extract_node_text, normalize_whitespace
 from ..ir.profiles import LanguageProfile
-from ..ir.types import ClassFieldSpec, ClassSpec, ImportSpec, ModuleVariableSpec
+from ..ir.types import ClassFieldSpec, ClassSpec, ImportSpec, ModuleVariableSpec, ParamSpec
 from ..parser.python_parser import parse_python_source
 from . import LanguagePlugin
 
@@ -301,6 +301,96 @@ def extract_py_class(node: Node) -> Optional[ClassSpec]:
 
 
 # ---------------------------------------------------------------------------
+# 引数・戻り値の型抽出
+# ---------------------------------------------------------------------------
+
+# self / cls は出力から除外するパラメーター名
+_PY_IMPLICIT_PARAMS = frozenset({"self", "cls"})
+
+
+def extract_py_params(fn_node: Node) -> tuple[ParamSpec, ...]:
+    """
+    Python の function_definition ノードから引数リストを抽出する。
+
+    対応パターン:
+      identifier:               def foo(x):                → 型なし引数
+      typed_parameter:          def foo(x: int):           → 型付き引数
+      typed_default_parameter:  def foo(x: int = 0):      → 型付きデフォルト引数
+      default_parameter:        def foo(x=0):              → 型なしデフォルト引数
+      list_splat_pattern:       def foo(*args):            → *args（is_rest=True）
+      dictionary_splat_pattern: def foo(**kwargs):         → **kwargs
+    self / cls は結果から除外する。
+    """
+    params_node = fn_node.child_by_field_name("parameters")
+    if params_node is None:
+        return ()
+
+    result: list[ParamSpec] = []
+    for child in params_node.named_children:
+        if child.type == "identifier":
+            name = extract_node_text(child).strip()
+            if name not in _PY_IMPLICIT_PARAMS:
+                result.append(ParamSpec(name=name))
+
+        elif child.type == "typed_parameter":
+            # name は identifier（複数あれば最初のもの）
+            name_node = next((c for c in child.named_children if c.type == "identifier"), None)
+            type_node  = child.child_by_field_name("type")
+            name       = extract_node_text(name_node).strip() if name_node is not None else ""
+            if name in _PY_IMPLICIT_PARAMS:
+                continue
+            type_text = normalize_whitespace(extract_node_text(type_node)) if type_node is not None else ""
+            result.append(ParamSpec(name=name, type_text=type_text))
+
+        elif child.type == "typed_default_parameter":
+            name_node  = child.child_by_field_name("name")
+            type_node  = child.child_by_field_name("type")
+            value_node = child.child_by_field_name("value")
+            name       = extract_node_text(name_node).strip() if name_node is not None else ""
+            if name in _PY_IMPLICIT_PARAMS:
+                continue
+            type_text    = normalize_whitespace(extract_node_text(type_node))  if type_node  is not None else ""
+            default_text = normalize_whitespace(extract_node_text(value_node)) if value_node is not None else ""
+            result.append(ParamSpec(name=name, type_text=type_text, default_text=default_text))
+
+        elif child.type == "default_parameter":
+            name_node  = child.child_by_field_name("name")
+            value_node = child.child_by_field_name("value")
+            name       = extract_node_text(name_node).strip() if name_node is not None else ""
+            if name in _PY_IMPLICIT_PARAMS:
+                continue
+            default_text = normalize_whitespace(extract_node_text(value_node)) if value_node is not None else ""
+            result.append(ParamSpec(name=name, default_text=default_text))
+
+        elif child.type == "list_splat_pattern":
+            # *args
+            inner = next((c for c in child.named_children if c.type == "identifier"), None)
+            name  = extract_node_text(inner).strip() if inner is not None else "args"
+            result.append(ParamSpec(name=f"*{name}", is_rest=True))
+
+        elif child.type == "dictionary_splat_pattern":
+            # **kwargs
+            inner = next((c for c in child.named_children if c.type == "identifier"), None)
+            name  = extract_node_text(inner).strip() if inner is not None else "kwargs"
+            result.append(ParamSpec(name=f"**{name}"))
+
+    return tuple(result)
+
+
+def extract_py_return_type(fn_node: Node) -> str:
+    """
+    Python の function_definition ノードから戻り値の型テキストを返す。
+
+    return_type フィールドは `-> type` の型部分（"-> " は含まれない）。
+    型アノテーションがない場合は空文字を返す。
+    """
+    rt_node = fn_node.child_by_field_name("return_type")
+    if rt_node is None:
+        return ""
+    return normalize_whitespace(extract_node_text(rt_node))
+
+
+# ---------------------------------------------------------------------------
 # プラグイン定数（discover_plugins() が検出する）
 # ---------------------------------------------------------------------------
 
@@ -313,4 +403,6 @@ PLUGIN = LanguagePlugin(
     type_def_extractor=lambda _: None,  # Python は型定義抽出未対応
     direct_statement_extractors=(),
     class_extractor=extract_py_class,
+    param_extractor=extract_py_params,
+    return_type_extractor=extract_py_return_type,
 )

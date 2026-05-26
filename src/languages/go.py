@@ -12,7 +12,7 @@ from tree_sitter import Node
 
 from ..ir.node_utils import extract_node_text, normalize_whitespace
 from ..ir.profiles import LanguageProfile
-from ..ir.types import DataTransformation, ImportSpec, ModuleVariableSpec
+from ..ir.types import DataTransformation, ImportSpec, ModuleVariableSpec, ParamSpec
 from ..parser.go_parser import parse_go_source
 from . import LanguagePlugin
 
@@ -257,6 +257,67 @@ def map_go_var_decl_to_ir(stmt_node: Node) -> Optional[DataTransformation]:
 
 
 # ---------------------------------------------------------------------------
+# 引数・戻り値の型抽出
+# ---------------------------------------------------------------------------
+
+def extract_go_params(fn_node: Node) -> tuple[ParamSpec, ...]:
+    """
+    Go の function_declaration ノードから引数リストを抽出する。
+
+    Go の parameter_list 構造:
+      parameter_declaration: name=identifier_list / identifier, type=<型>
+      variadic_parameter_declaration: name=identifier, type=<型>（...T 形式）
+
+    複数変数が同じ型を共有するケース（a, b int）は個別の ParamSpec に展開する。
+    名前なしパラメーター（型のみ: func foo(int, string)）は名前を "_" とする。
+    """
+    params_node = fn_node.child_by_field_name("parameters")
+    if params_node is None:
+        return ()
+
+    result: list[ParamSpec] = []
+    for child in params_node.named_children:
+        if child.type == "parameter_declaration":
+            name_node = child.child_by_field_name("name")
+            type_node = child.child_by_field_name("type")
+            type_text = normalize_whitespace(extract_node_text(type_node)) if type_node is not None else ""
+
+            if name_node is not None:
+                # identifier_list（a, b int）または単一 identifier
+                raw_names = extract_node_text(name_node).strip()
+                for name in (n.strip() for n in raw_names.split(",") if n.strip()):
+                    result.append(ParamSpec(name=name, type_text=type_text))
+            else:
+                # 名前なしパラメーター（型のみ）
+                result.append(ParamSpec(name="_", type_text=type_text))
+
+        elif child.type == "variadic_parameter_declaration":
+            # ...T 形式
+            name_node = child.child_by_field_name("name")
+            type_node = child.child_by_field_name("type")
+            name      = extract_node_text(name_node).strip() if name_node is not None else "args"
+            type_text = normalize_whitespace(extract_node_text(type_node)) if type_node is not None else ""
+            result.append(ParamSpec(name=name, type_text=f"...{type_text}", is_rest=True))
+
+    return tuple(result)
+
+
+def extract_go_return_type(fn_node: Node) -> str:
+    """
+    Go の function_declaration ノードから戻り値の型テキストを返す。
+
+    result フィールド:
+      単一型:          string, int, error
+      複数型（括弧付き）: (string, error), (result string, err error)
+    戻り値なしの場合は空文字を返す。
+    """
+    result_node = fn_node.child_by_field_name("result")
+    if result_node is None:
+        return ""
+    return normalize_whitespace(extract_node_text(result_node))
+
+
+# ---------------------------------------------------------------------------
 # プラグイン定数（discover_plugins() が検出する）
 # ---------------------------------------------------------------------------
 
@@ -273,4 +334,6 @@ PLUGIN = LanguagePlugin(
         ("short_var_declaration", map_go_short_var_decl_to_ir),
         ("var_declaration",       map_go_var_decl_to_ir),
     ),
+    param_extractor=extract_go_params,
+    return_type_extractor=extract_go_return_type,
 )

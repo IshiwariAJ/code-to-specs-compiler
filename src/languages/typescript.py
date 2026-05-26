@@ -12,7 +12,7 @@ from tree_sitter import Node
 
 from ..ir.node_utils import extract_node_text, normalize_whitespace
 from ..ir.profiles import LanguageProfile
-from ..ir.types import ImportSpec, ModuleVariableSpec, TypeDefinitionSpec
+from ..ir.types import ImportSpec, ModuleVariableSpec, ParamSpec, TypeDefinitionSpec
 from ..parser.ts_parser import parse_typescript_source
 from . import LanguagePlugin
 
@@ -186,6 +186,76 @@ def extract_ts_type_definition(node: Node) -> Optional[TypeDefinitionSpec]:
 
 
 # ---------------------------------------------------------------------------
+# 引数・戻り値の型抽出
+# ---------------------------------------------------------------------------
+
+def _extract_ts_param_type(type_annotation_node: Node) -> str:
+    """
+    TypeScript の type_annotation ノードから型テキストを返す。
+
+    type_annotation は ":" を含む（例: ": string", ": User"）。
+    最初の named child が実際の型ノードであるため、それを取り出す。
+    named child がない場合はテキストから ": " を除去してフォールバック。
+    """
+    inner = next((c for c in type_annotation_node.named_children), None)
+    if inner is not None:
+        return normalize_whitespace(extract_node_text(inner))
+    return normalize_whitespace(extract_node_text(type_annotation_node)).lstrip(":").strip()
+
+
+def extract_ts_params(fn_node: Node) -> tuple[ParamSpec, ...]:
+    """
+    TypeScript の function_declaration ノードから引数リストを抽出する。
+
+    対応パターン:
+      required_parameter:  (user: User)
+      optional_parameter:  (limit?: number)
+      optional_parameter with default: (id: number = 0)
+      rest_parameter:      (...args: string[])
+    """
+    params_node = fn_node.child_by_field_name("parameters")
+    if params_node is None:
+        return ()
+
+    result: list[ParamSpec] = []
+    for child in params_node.named_children:
+        if child.type in ("required_parameter", "optional_parameter"):
+            pattern_node = child.child_by_field_name("pattern")
+            type_node    = child.child_by_field_name("type")
+            value_node   = child.child_by_field_name("value")
+
+            name         = extract_node_text(pattern_node).strip() if pattern_node is not None else ""
+            type_text    = _extract_ts_param_type(type_node) if type_node is not None else ""
+            default_text = normalize_whitespace(extract_node_text(value_node)) if value_node is not None else ""
+
+            result.append(ParamSpec(name=name, type_text=type_text, default_text=default_text))
+
+        elif child.type == "rest_parameter":
+            pattern_node = child.child_by_field_name("pattern")
+            type_node    = child.child_by_field_name("type")
+
+            name      = extract_node_text(pattern_node).strip() if pattern_node is not None else ""
+            type_text = _extract_ts_param_type(type_node) if type_node is not None else ""
+
+            result.append(ParamSpec(name=name, type_text=type_text, is_rest=True))
+
+    return tuple(result)
+
+
+def extract_ts_return_type(fn_node: Node) -> str:
+    """
+    TypeScript の function_declaration ノードから戻り値の型テキストを返す。
+
+    return_type フィールドは type_annotation ノード（": ReturnType" の形）。
+    最初の named child が実際の型。
+    """
+    rt_node = fn_node.child_by_field_name("return_type")
+    if rt_node is None:
+        return ""
+    return _extract_ts_param_type(rt_node)
+
+
+# ---------------------------------------------------------------------------
 # プラグイン定数（discover_plugins() が検出する）
 # ---------------------------------------------------------------------------
 
@@ -198,4 +268,6 @@ PLUGIN = LanguagePlugin(
     type_def_extractor=extract_ts_type_definition,
     direct_statement_extractors=(),
     class_extractor=lambda _: None,  # TypeScript クラスは将来対応
+    param_extractor=extract_ts_params,
+    return_type_extractor=extract_ts_return_type,
 )

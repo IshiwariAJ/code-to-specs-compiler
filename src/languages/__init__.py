@@ -19,7 +19,7 @@ from typing import Callable, Optional
 from tree_sitter import Node
 
 from ..ir.profiles import LanguageProfile
-from ..ir.types import ClassSpec, DataTransformation, ImportSpec, ModuleVariableSpec, TypeDefinitionSpec
+from ..ir.types import ClassSpec, DataTransformation, ImportSpec, ModuleVariableSpec, ParamSpec, TypeDefinitionSpec
 
 
 @dataclass(frozen=True)
@@ -63,6 +63,14 @@ class LanguagePlugin:
     # Python: @dataclass / class を抽出する関数
     # TypeScript / Go: lambda _: None（クラスは別途 TypeDefinitionSpec / 将来対応）
     class_extractor: Callable[[Node], Optional[ClassSpec]]
+
+    # 関数定義ノード → 引数リスト（ParamSpec のタプル）
+    # 未対応の場合は lambda _: () を渡す
+    param_extractor: Callable[[Node], tuple[ParamSpec, ...]]
+
+    # 関数定義ノード → 戻り値の型テキスト（型アノテーションがなければ空文字）
+    # 未対応の場合は lambda _: "" を渡す
+    return_type_extractor: Callable[[Node], str]
 
 
 def discover_plugins() -> dict[str, LanguagePlugin]:

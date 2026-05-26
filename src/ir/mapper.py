@@ -31,6 +31,8 @@ from .types import (
     LoopNode,
     ModuleSpec,
     ModuleVariableSpec,
+    ParamSpec,
+    ReturnNode,
     SideEffect,
     TypeDefinitionSpec,
 )
@@ -758,6 +760,20 @@ def _map_statement_to_ir(
         if mapper_fn is not None:
             ir_node = mapper_fn(statement_node)
 
+    # --- return / throw / raise 文（ガード句以外）---
+    # ガード句（if (cond) { return/throw }）は上の if_statement ブランチで処理済み。
+    # ここでは関数本体またはループ本体に直接現れる return/throw/raise を扱う。
+    elif node_type in {"return_statement", "throw_statement", "raise_statement"}:
+        value_node = next((c for c in statement_node.named_children), None)
+        value_text = extract_node_text(value_node).strip() if value_node is not None else ""
+        if node_type == "throw_statement":
+            action = "throw"
+        elif node_type == "raise_statement":
+            action = "raise"
+        else:
+            action = "return"
+        ir_node = ReturnNode(kind="ReturnNode", value_text=value_text, action=action)
+
     if ir_node is None:
         return None
 
@@ -802,7 +818,10 @@ def _find_top_level_functions(root_node: Node, profile: LanguageProfile) -> list
 
 
 def _map_function_to_spec(
-    fn_node: Node, profile: LanguageProfile, direct_stmt_map: _DirectStmtMap
+    fn_node: Node,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
 ) -> FunctionSpec:
     """関数定義 AST ノードを FunctionSpec IR に変換する。"""
     name_node = fn_node.child_by_field_name("name")
@@ -815,6 +834,8 @@ def _map_function_to_spec(
         name=name,
         body=tuple(ir_nodes),
         description=_get_function_description(fn_node, profile),
+        params=plugin.param_extractor(fn_node),
+        return_type=plugin.return_type_extractor(fn_node),
     )
 
 
@@ -918,7 +939,7 @@ def map_source_to_module_spec(
         type_definitions=_extract_all_type_definitions(root_node, plugin),
         class_definitions=_extract_all_class_definitions(root_node, plugin),
         functions=tuple(
-            _map_function_to_spec(fn_node, profile, direct_stmt_map)
+            _map_function_to_spec(fn_node, profile, direct_stmt_map, plugin)
             for fn_node in _find_top_level_functions(root_node, profile)
         ),
     )
