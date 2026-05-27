@@ -44,6 +44,9 @@ desktop.ini
 CLAUDE.md
 自然言語コンパイラ（Universal Code to Specs）詳細設計書.md
 
+# 特許出願書類（機密・Git管理外）
+patent/
+
 # コンパイル出力（サンプル出力は examples_specs/ のみ管理対象外に）
 examples_specs/
 *_specs/
