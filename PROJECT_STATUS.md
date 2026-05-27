@@ -20,6 +20,7 @@ Phase R3 ██████████ 完了     Python クラス定義対応�
 Phase R4 ██████████ 完了     クラスメソッド抽出対応（クラス内メソッド一覧を仕様書に表示）
 Phase 5B ██████████ 完了     Java 対応（src/languages/java.py 1ファイル追加）
 Phase R5 ██████████ 完了     レンダラー強化（Java クラスメソッドの処理フロー詳細を出力）
+Phase R6 ██████████ 完了     条件分岐ボディのネスト IR 解析（CaseNode.body）
 ```
 
 ---
@@ -520,14 +521,45 @@ class ClassSpec:
 
 ### テスト結果
 
-**408件 全グリーン**（実行時間 0.42s）
+**411件 全グリーン**（実行時間 0.42s）
 
 | テストファイル | 件数 |
 |---|---|
-| `tests/test_mapper.py` | 183件（+38） |
-| `tests/test_renderer.py` | 100件（変化なし）|
-| `tests/test_pipeline.py` | 83件（+22） |
+| `tests/test_mapper.py` | 186件 |
+| `tests/test_renderer.py` | 101件 |
+| `tests/test_pipeline.py` | 85件 |
 | `tests/test_batch.py` | 39件 |
+
+---
+
+## Phase R6 — 完了 ✅（条件分岐ボディのネスト IR 解析）
+
+**完了日**: 2026-05-27  
+**目的**: `if / else if / else` の各ケース内の処理を、生テキストではなく Universal IR として再帰的に抽出する。
+
+### 実装内容
+
+| 変更ファイル | 内容 |
+|---|---|
+| `src/ir/types.py` | `CaseNode.action_texts` を `body: tuple[IRNode, ...]` に変更 |
+| `src/ir/mapper.py` | 条件分岐ケースの本体を `_extract_body_ir_nodes()` で再帰解析 |
+| `src/renderer/markdown.py` | ケース内の `ReturnNode` / `DataTransformation` / `SideEffect` / `LoopNode` 等を通常IRとして描画 |
+| `tests/test_mapper.py` | ケース内 return / データ変換 / 副作用のIR化テストを追加 |
+
+### 効果
+
+以前は条件分岐ケース内の処理が `return ...` などの生コード表示だったが、現在は以下のように構造化される:
+
+```markdown
+* **ケース 1: totalAmount >= PREMIUM_THRESHOLD**
+  * ↩️ 返却する: `{ points: MAX_POINTS, message: "プレミアム特典付与" }`
+```
+
+これにより、条件分岐内部の代入・副作用・返却も、ループ本体と同じIR表現で監査できるようになった。
+
+### テスト結果
+
+**411件 全グリーン**（実行時間 0.42s）
 
 ---
 

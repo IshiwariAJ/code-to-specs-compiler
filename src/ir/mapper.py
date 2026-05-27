@@ -300,36 +300,68 @@ def _extract_condition_text(if_node: Node) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _extract_case_action_texts(
-    block_node: Node, profile: LanguageProfile
-) -> tuple[str, ...]:
-    """ブロックノードの各文のテキストをアクション一覧として返す。"""
-    statements = _get_block_statements(block_node, profile)
-    return tuple(extract_node_text(stmt) for stmt in statements)
+def _extract_case_body_ir_nodes(
+    block_node: Node | None,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
+    warnings: list[str] | None,
+    scope: str,
+) -> tuple[IRNode, ...]:
+    """条件分岐ケースの本体ブロックをIRノード列に変換する。"""
+    if block_node is None:
+        return ()
+    return tuple(_extract_body_ir_nodes(
+        block_node,
+        profile,
+        direct_stmt_map,
+        plugin,
+        warnings,
+        scope,
+    ))
 
 
-def _build_case_from_if(if_node: Node, profile: LanguageProfile) -> CaseNode:
-    """if 文の単一ケース（条件と本体アクション）を CaseNode に変換する。"""
+def _build_case_from_if(
+    if_node: Node,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
+    warnings: list[str] | None,
+    scope: str,
+) -> CaseNode:
+    """if 文の単一ケース（条件と本体IR）を CaseNode に変換する。"""
     condition_text = _extract_condition_text(if_node)
 
     consequence = _get_if_then_block(if_node, profile)
-    action_texts = (
-        _extract_case_action_texts(consequence, profile)
-        if consequence is not None
-        else ()
+    body = _extract_case_body_ir_nodes(
+        consequence,
+        profile,
+        direct_stmt_map,
+        plugin,
+        warnings,
+        scope,
     )
 
-    return CaseNode(condition_text=condition_text, action_texts=action_texts)
+    return CaseNode(condition_text=condition_text, body=body)
 
 
-def _collect_all_cases_nested(if_node: Node, profile: LanguageProfile) -> list[CaseNode]:
+def _collect_all_cases_nested(
+    if_node: Node,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
+    warnings: list[str] | None,
+    scope: str,
+) -> list[CaseNode]:
     """
     nested スタイル（TypeScript / Go）の else if チェーンを再帰的に辿る。
 
     TypeScript: alternative → else_clause → [if_statement | statement_block]
     Go:         alternative → [if_statement | block]（else_clause ラッパーなし）
     """
-    cases: list[CaseNode] = [_build_case_from_if(if_node, profile)]
+    cases: list[CaseNode] = [
+        _build_case_from_if(if_node, profile, direct_stmt_map, plugin, warnings, scope)
+    ]
 
     alternative = if_node.child_by_field_name("alternative")
     if alternative is None:
@@ -349,18 +381,39 @@ def _collect_all_cases_nested(if_node: Node, profile: LanguageProfile) -> list[C
         return cases
 
     if else_body.type == "if_statement":
-        cases.extend(_collect_all_cases_nested(else_body, profile))
+        cases.extend(_collect_all_cases_nested(
+            else_body,
+            profile,
+            direct_stmt_map,
+            plugin,
+            warnings,
+            scope,
+        ))
     else:
-        action_texts = _extract_case_action_texts(else_body, profile)
+        body = _extract_case_body_ir_nodes(
+            else_body,
+            profile,
+            direct_stmt_map,
+            plugin,
+            warnings,
+            scope,
+        )
         cases.append(CaseNode(
             condition_text="上記のいずれにも該当しない場合（デフォルト）",
-            action_texts=action_texts,
+            body=body,
         ))
 
     return cases
 
 
-def _collect_all_cases_flat(if_node: Node, profile: LanguageProfile) -> list[CaseNode]:
+def _collect_all_cases_flat(
+    if_node: Node,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
+    warnings: list[str] | None,
+    scope: str,
+) -> list[CaseNode]:
     """
     Python スタイル: elif_clause / else_clause が if_statement の兄弟として並ぶ。
     """
@@ -368,8 +421,15 @@ def _collect_all_cases_flat(if_node: Node, profile: LanguageProfile) -> list[Cas
 
     condition_text = strip_outer_parens(extract_node_text(named[0]))
     block_node = named[1]
-    action_texts = _extract_case_action_texts(block_node, profile)
-    cases: list[CaseNode] = [CaseNode(condition_text=condition_text, action_texts=action_texts)]
+    body = _extract_case_body_ir_nodes(
+        block_node,
+        profile,
+        direct_stmt_map,
+        plugin,
+        warnings,
+        scope,
+    )
+    cases: list[CaseNode] = [CaseNode(condition_text=condition_text, body=body)]
 
     for node in named[2:]:
         if node.type == "elif_clause":
@@ -380,25 +440,42 @@ def _collect_all_cases_flat(if_node: Node, profile: LanguageProfile) -> list[Cas
                 if cond_node is not None
                 else ""
             )
-            elif_actions = (
-                _extract_case_action_texts(conseq_node, profile)
-                if conseq_node is not None
-                else ()
+            elif_body = _extract_case_body_ir_nodes(
+                conseq_node,
+                profile,
+                direct_stmt_map,
+                plugin,
+                warnings,
+                scope,
             )
-            cases.append(CaseNode(condition_text=cond_text, action_texts=elif_actions))
+            cases.append(CaseNode(condition_text=cond_text, body=elif_body))
 
         elif node.type == "else_clause":
             body = node.child_by_field_name("body")
-            else_actions = _extract_case_action_texts(body, profile) if body is not None else ()
+            else_body = _extract_case_body_ir_nodes(
+                body,
+                profile,
+                direct_stmt_map,
+                plugin,
+                warnings,
+                scope,
+            )
             cases.append(CaseNode(
                 condition_text="上記のいずれにも該当しない場合（デフォルト）",
-                action_texts=else_actions,
+                body=else_body,
             ))
 
     return cases
 
 
-def _collect_all_cases_elseif_clauses(if_node: Node, profile: LanguageProfile) -> list[CaseNode]:
+def _collect_all_cases_elseif_clauses(
+    if_node: Node,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
+    warnings: list[str] | None,
+    scope: str,
+) -> list[CaseNode]:
     """
     PowerShell スタイル: elseif_clauses コンテナ + else_clause。
 
@@ -413,8 +490,15 @@ def _collect_all_cases_elseif_clauses(if_node: Node, profile: LanguageProfile) -
     # then ブロック: named[0] = 条件 pipeline、named[1] = statement_block
     condition_text = strip_outer_parens(extract_node_text(named[0])) if named else ""
     then_block = named[1] if len(named) > 1 else None
-    action_texts = _extract_case_action_texts(then_block, profile) if then_block is not None else ()
-    cases: list[CaseNode] = [CaseNode(condition_text=condition_text, action_texts=action_texts)]
+    then_body = _extract_case_body_ir_nodes(
+        then_block,
+        profile,
+        direct_stmt_map,
+        plugin,
+        warnings,
+        scope,
+    )
+    cases: list[CaseNode] = [CaseNode(condition_text=condition_text, body=then_body)]
 
     for node in named[2:]:
         if node.type == "elseif_clauses":
@@ -428,32 +512,57 @@ def _collect_all_cases_elseif_clauses(if_node: Node, profile: LanguageProfile) -
                     strip_outer_parens(extract_node_text(cond_node))
                     if cond_node is not None else ""
                 )
-                elif_actions = (
-                    _extract_case_action_texts(body_node, profile)
-                    if body_node is not None else ()
+                elif_body = _extract_case_body_ir_nodes(
+                    body_node,
+                    profile,
+                    direct_stmt_map,
+                    plugin,
+                    warnings,
+                    scope,
                 )
-                cases.append(CaseNode(condition_text=cond_text, action_texts=elif_actions))
+                cases.append(CaseNode(condition_text=cond_text, body=elif_body))
 
         elif node.type == "else_clause":
             # else_clause.named_children[0] = statement_block
             body = node.named_children[0] if node.named_children else None
-            else_actions = _extract_case_action_texts(body, profile) if body is not None else ()
+            else_body = _extract_case_body_ir_nodes(
+                body,
+                profile,
+                direct_stmt_map,
+                plugin,
+                warnings,
+                scope,
+            )
             cases.append(CaseNode(
                 condition_text="上記のいずれにも該当しない場合（デフォルト）",
-                action_texts=else_actions,
+                body=else_body,
             ))
 
     return cases
 
 
-def _map_if_to_condition_block(if_node: Node, profile: LanguageProfile) -> ConditionBlock:
+def _map_if_to_condition_block(
+    if_node: Node,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
+    warnings: list[str] | None,
+    scope: str,
+) -> ConditionBlock:
     """if/else チェーン全体を ConditionBlock IR ノードに変換する。"""
     if profile.elif_structure == "nested":
-        cases = _collect_all_cases_nested(if_node, profile)
+        cases = _collect_all_cases_nested(if_node, profile, direct_stmt_map, plugin, warnings, scope)
     elif profile.elif_structure == "elseif_clauses":
-        cases = _collect_all_cases_elseif_clauses(if_node, profile)
+        cases = _collect_all_cases_elseif_clauses(
+            if_node,
+            profile,
+            direct_stmt_map,
+            plugin,
+            warnings,
+            scope,
+        )
     else:
-        cases = _collect_all_cases_flat(if_node, profile)
+        cases = _collect_all_cases_flat(if_node, profile, direct_stmt_map, plugin, warnings, scope)
 
     return ConditionBlock(
         kind="ConditionBlock",
@@ -719,7 +828,14 @@ def _map_statement_to_ir(
         if _is_guard_clause(statement_node, profile):
             ir_node = _map_if_to_guard_clause(statement_node, profile)
         else:
-            ir_node = _map_if_to_condition_block(statement_node, profile)
+            ir_node = _map_if_to_condition_block(
+                statement_node,
+                profile,
+                direct_stmt_map,
+                plugin,
+                warnings,
+                scope,
+            )
 
     elif node_type == profile.for_each_node_type:
         if plugin.for_loop_mapper is not None:

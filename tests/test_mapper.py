@@ -19,6 +19,7 @@ from src.ir.types import (
     LoopNode,
     ModuleSpec,
     ModuleVariableSpec,
+    ReturnNode,
     SideEffect,
     TypeDefinitionSpec,
 )
@@ -233,6 +234,43 @@ class TestConditionBlock:
         )
         cases = _py_body(src)[0].cases
         assert len(cases) == 4
+
+    def test_typescript_case_body_contains_return_node(self):
+        body = _ts_body("function f(x) { if (x > 0) { return 1; } else { return 0; } }")
+        case_body = body[0].cases[0].body
+        assert len(case_body) == 1
+        assert isinstance(case_body[0], ReturnNode)
+        assert case_body[0].value_text == "1"
+
+    def test_typescript_case_body_contains_data_transformation(self):
+        src = (
+            "function f(user) {"
+            " let points = 0;"
+            " if (user.rank === 'Gold') {"
+            "   points += 1000;"
+            " } else {"
+            "   points += 100;"
+            " }"
+            "}"
+        )
+        condition = _ts_body(src)[1]
+        assert isinstance(condition, ConditionBlock)
+        assert isinstance(condition.cases[0].body[0], DataTransformation)
+        assert condition.cases[0].body[0].operation == "ADD"
+
+    def test_typescript_case_body_contains_side_effect(self):
+        src = (
+            "function f(user) {"
+            " if (user.active) {"
+            "   notify(user);"
+            " } else {"
+            "   log(user);"
+            " }"
+            "}"
+        )
+        condition = _ts_body(src)[0]
+        assert isinstance(condition.cases[0].body[0], SideEffect)
+        assert condition.cases[0].body[0].description == "notify(user)"
 
 
 # ---------------------------------------------------------------------------

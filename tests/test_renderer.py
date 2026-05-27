@@ -18,6 +18,7 @@ from src.ir.types import (
     LoopNode,
     ModuleSpec,
     ModuleVariableSpec,
+    ReturnNode,
     SideEffect,
     TypeDefinitionSpec,
 )
@@ -146,30 +147,36 @@ class TestRenderGuardClause:
 class TestRenderConditionBlock:
     def test_section_header_contains_condition_label(self):
         node = ConditionBlock(kind="ConditionBlock", cases=(
-            CaseNode(condition_text="x > 0", action_texts=("return 1;",)),
+            CaseNode(condition_text="x > 0", body=(
+                ReturnNode(kind="ReturnNode", value_text="1"),
+            )),
         ))
         output = _render_single_node(node)
         assert "条件分岐" in output
 
     def test_single_case_condition_text_appears(self):
         node = ConditionBlock(kind="ConditionBlock", cases=(
-            CaseNode(condition_text="x > 100", action_texts=("return 1000;",)),
+            CaseNode(condition_text="x > 100", body=(
+                ReturnNode(kind="ReturnNode", value_text="1000"),
+            )),
         ))
         output = _render_single_node(node)
         assert "x > 100" in output
 
     def test_single_case_action_text_appears(self):
         node = ConditionBlock(kind="ConditionBlock", cases=(
-            CaseNode(condition_text="x > 100", action_texts=("return 1000;",)),
+            CaseNode(condition_text="x > 100", body=(
+                ReturnNode(kind="ReturnNode", value_text="1000"),
+            )),
         ))
         output = _render_single_node(node)
-        assert "return 1000;" in output
+        assert "返却する: `1000`" in output
 
     def test_three_cases_have_case_numbers(self):
         node = ConditionBlock(kind="ConditionBlock", cases=(
-            CaseNode(condition_text="x >= 90", action_texts=("return 'A';",)),
-            CaseNode(condition_text="x >= 70", action_texts=("return 'B';",)),
-            CaseNode(condition_text="デフォルト", action_texts=("return 'C';",)),
+            CaseNode(condition_text="x >= 90", body=(ReturnNode(kind="ReturnNode", value_text="'A'"),)),
+            CaseNode(condition_text="x >= 70", body=(ReturnNode(kind="ReturnNode", value_text="'B'"),)),
+            CaseNode(condition_text="デフォルト", body=(ReturnNode(kind="ReturnNode", value_text="'C'"),)),
         ))
         output = _render_single_node(node)
         assert "ケース 1" in output
@@ -178,8 +185,8 @@ class TestRenderConditionBlock:
 
     def test_all_condition_texts_appear(self):
         node = ConditionBlock(kind="ConditionBlock", cases=(
-            CaseNode(condition_text="score >= 90", action_texts=()),
-            CaseNode(condition_text="score >= 70", action_texts=()),
+            CaseNode(condition_text="score >= 90"),
+            CaseNode(condition_text="score >= 70"),
         ))
         output = _render_single_node(node)
         assert "score >= 90" in output
@@ -607,7 +614,10 @@ class TestRenderWithComments:
     def test_condition_block_with_comment(self):
         node = ConditionBlock(
             kind="ConditionBlock",
-            cases=(CaseNode(condition_text="x > 0", action_texts=("return x;",)),),
+            cases=(CaseNode(
+                condition_text="x > 0",
+                body=(ReturnNode(kind="ReturnNode", value_text="x"),),
+            ),),
             comment="// 条件によって分岐",
         )
         output = _render_single_node(node)

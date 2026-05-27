@@ -419,7 +419,11 @@ def _render_side_effect(node: SideEffect, index: int) -> str:
 
 def _render_guard_clause(node: GuardClause, index: int) -> str:
     """GuardClause IR ノードを Markdown テキストに変換する。"""
-    lines = [f"### {index}. 📢 前提条件（ガード句）"]
+    lines = [
+        f"### {index}. 📢 前提条件（ガード句）"
+        if index > 0
+        else "* 📢 前提条件（ガード句）"
+    ]
     if node.comment:
         comment_line = _render_comment_blockquote(node.comment)
         if comment_line:
@@ -445,9 +449,9 @@ def _render_case_node(case: CaseNode, case_number: int) -> list[str]:
     """
     lines = [f"* **ケース {case_number}: {case.condition_text}**"]
 
-    for action_text in case.action_texts:
-        first_line = _truncate_to_first_line(action_text)
-        lines.append(f"  * ➔ `{first_line}`")
+    for nested_node in case.body:
+        nested_text = _render_ir_node(nested_node, index=0)
+        lines.append(_indent_lines(nested_text, indent="  "))
 
     return lines
 
@@ -459,7 +463,11 @@ def _render_case_node(case: CaseNode, case_number: int) -> list[str]:
 
 def _render_condition_block(node: ConditionBlock, index: int) -> str:
     """ConditionBlock IR ノードを Markdown テキストに変換する。"""
-    lines = [f"### {index}. 🔀 条件分岐"]
+    lines = [
+        f"### {index}. 🔀 条件分岐"
+        if index > 0
+        else "* 🔀 条件分岐:"
+    ]
     if node.comment:
         comment_line = _render_comment_blockquote(node.comment)
         if comment_line:
@@ -479,14 +487,16 @@ def _render_condition_block(node: ConditionBlock, index: int) -> str:
 def _render_loop_header(node: LoopNode, index: int) -> str:
     """LoopNode のヘッダー行（繰り返し処理の説明）を返す。"""
     if node.loop_type == "FOR_EACH":
+        prefix = f"### {index}. 🔄 繰り返し処理" if index > 0 else "* 🔄 繰り返し処理"
         return (
-            f"### {index}. 🔄 繰り返し処理\n"
+            f"{prefix}\n"
             f"* `{node.collection}` の各要素（`{node.iterator}`）に対して以下をループ実行:"
         )
 
     # FOR_RANGE
+    prefix = f"### {index}. 🔄 繰り返し処理" if index > 0 else "* 🔄 繰り返し処理"
     return (
-        f"### {index}. 🔄 繰り返し処理\n"
+        f"{prefix}\n"
         f"* `{node.collection}` の条件で `{node.iterator}` をカウントしながらループ実行:"
     )
 

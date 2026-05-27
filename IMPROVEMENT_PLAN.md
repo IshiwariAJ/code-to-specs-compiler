@@ -187,10 +187,10 @@ class UserService {
 
 ---
 
-#### ⑦ 条件分岐ボディのネスト IR 解析
+#### ~~⑦ 条件分岐ボディのネスト IR 解析~~ ✅ 実装済み（2026-05-27）
 
-**問題**: 現在 `CaseNode.action_texts` は生テキスト（`tuple[str, ...]`）のまま。  
-条件分岐の各ケース内に代入・ループ・副作用があっても、生コードとして出力される。
+**解決済み**: `CaseNode.action_texts` は `body: tuple[IRNode, ...]` に置き換え済み。  
+条件分岐の各ケース内にある代入・ループ・副作用・return も、通常のIRとして出力される。
 
 **対象コード例**:
 ```typescript
@@ -201,11 +201,10 @@ if (user.rank === "Gold") {
 }
 ```
 
-**対応方法**: `CaseNode` の `action_texts` を `body: tuple[IRNode, ...]` に変更し、  
-マッパーが条件分岐ボディを再帰的に解析するようにする。
+**実装内容**: `CaseNode` の `action_texts` を `body: tuple[IRNode, ...]` に変更し、  
+マッパーが条件分岐ボディを `_extract_body_ir_nodes()` で再帰的に解析するようにした。
 
-> ⚠️ **注意**: この変更は `CaseNode` の型定義・マッパー・レンダラーの全層に影響する大きな変更。  
-> テスト (`test_mapper.py`, `test_renderer.py`) の大幅な更新も必要。
+**テスト**: ケース内 return / データ変換 / 副作用のIR化を `test_mapper.py` で追加検証済み。
 
 ---
 
@@ -301,7 +300,7 @@ Step 3  ③ try / catch / finally           ← TryCatchNode 追加（全言語�
 Step 4  ④ while / do-while ループ         ← LoopNode に WHILE 種別追加
 Step 5  ⑤ アロー関数の検出               ← TypeScript 限定の追加
 Step 6  ⑥ クラスメソッドの検出           ← ClassSpec 拡張
-Step 7  ⑦ 条件分岐ボディのネスト IR 解析  ← 大規模変更（最後のほうが安全）
+Step 7  ⑦ 条件分岐ボディのネスト IR 解析  ✅ 完了（2026-05-27）
 Step 8  ⑧ switch / match 文
 Step 9  ⑨ async / await マーカー
 Step 10 ⑩ TypeScript class 定義
@@ -322,6 +321,6 @@ Step 13 ⑬ 分割代入
 | ④ while | LoopNode 変更 | 全言語 | TS / Py / Go | LoopNode レンダリング更新 | 追加 |
 | ⑤ アロー関数 | 変更なし | — | TS のみ | 変更なし | 追加 |
 | ⑥ クラスメソッド | ClassSpec 拡張 | — | 全言語 | ClassSpec レンダリング更新 | 追加 |
-| ⑦ 条件分岐ネスト | CaseNode 変更 | 全関数 | 全言語 | 大幅更新 | 大幅更新 |
+| ~~⑦ 条件分岐ネスト~~ ✅ | CaseNode 変更 | 全関数 | 全言語 | 更新済み | 追加済み |
 | ⑧ switch/match | SwitchNode 追加 | 全言語 | TS / Py | 追加 | 追加 |
 | ⑨ async/await | FunctionSpec 拡張 | 全言語 | TS / Py / Go | 更新 | 追加 |

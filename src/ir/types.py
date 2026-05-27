@@ -159,8 +159,8 @@ class CaseNode:
     """
     条件分岐の1ケース（if / else if / else の1つの分岐）
     """
-    condition_text: str           # 条件式のテキスト、またはデフォルトラベル
-    action_texts: tuple[str, ...] # このケースで実行されるアクションの一覧
+    condition_text: str          # 条件式のテキスト、またはデフォルトラベル
+    body: tuple[IRNode, ...] = () # このケースで実行される処理のIR一覧
 
 
 @dataclass(frozen=True)

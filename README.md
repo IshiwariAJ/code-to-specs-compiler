@@ -5,7 +5,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-408%20passing-brightgreen.svg)](#テスト--testing)
+[![Tests](https://img.shields.io/badge/tests-411%20passing-brightgreen.svg)](#テスト--testing)
 
 ---
 
@@ -23,7 +23,7 @@ LLMは使用しません。[tree-sitter](https://tree-sitter.github.io/tree-sitt
 | 🎯 **ハルシネーションなし** | AIを使わないため、コード由来でない説明を付加しない |
 | 🔒 **完全ローカル実行** | 機密コード・社内コードも外部送信なしで安全に処理 |
 | 🌐 **多言語・統一フォーマット** | TypeScript / Python / Go / PowerShell / Java から同一Markdownフォーマットで出力 |
-| ⚡ **高速・決定論的** | 同じ入力からは常に同じ出力（408テスト全グリーン） |
+| ⚡ **高速・決定論的** | 同じ入力からは常に同じ出力（411テスト全グリーン） |
 | ⚠️ **未抽出構文を明示** | 現在のIRで仕様化できない関数内構文は抽出警告として出力 |
 
 ---
@@ -188,7 +188,7 @@ src/languages/<言語名>.py      ← LanguagePlugin 定数を定義するだけ
 | IR型 | 検出対象 |
 |---|---|
 | `GuardClause` | `if (...) { return / throw / raise }` — 早期中断パターン |
-| `ConditionBlock` | `if / elif / else` チェーン全体 |
+| `ConditionBlock` | `if / elif / else` チェーン全体（各ケース内の処理もIRとして再帰解析） |
 | `LoopNode` | `for...of`（FOR_EACH）/ 古典的`for`（FOR_RANGE）/ Python `for` / Go `range` |
 | `DataTransformation` | `+=`, `-=`, `=`, `:=` などの代入・演算更新 |
 | `SideEffect` | 関数呼び出し（`console.log`, `arr.push` など） |
@@ -212,11 +212,11 @@ pytest
 
 | テストファイル | 件数 | 内容 |
 |---|---|---|
-| `tests/test_mapper.py` | 183件 | AST → IR マッピングのユニットテスト |
+| `tests/test_mapper.py` | 186件 | AST → IR マッピングのユニットテスト |
 | `tests/test_renderer.py` | 101件 | IR → Markdown レンダリングのユニットテスト |
 | `tests/test_pipeline.py` | 85件 | E2E 統合テスト（TypeScript / Python / Go / PowerShell / Java） |
 | `tests/test_batch.py` | 39件 | バッチコンパイル機能のテスト |
-| **合計** | **408件** | **全グリーン** |
+| **合計** | **411件** | **全グリーン** |
 
 ---
 
@@ -242,7 +242,7 @@ It uses no LLMs — only compiler technology ([tree-sitter](https://tree-sitter.
 | 🎯 **Zero hallucination** | No AI means the spec only contains what the code actually says |
 | 🔒 **Fully local** | Confidential code never leaves your machine |
 | 🌐 **Multi-language, unified format** | TypeScript, Python, Go, PowerShell, and Java all produce the same Markdown structure |
-| ⚡ **Fast & deterministic** | Same input always produces the same output (408 tests passing) |
+| ⚡ **Fast & deterministic** | Same input always produces the same output (411 tests passing) |
 
 ---
 
@@ -329,7 +329,7 @@ src/languages/<lang>.py      ← define a LanguagePlugin constant
 | IR Type | Detects |
 |---|---|
 | `GuardClause` | Early-return / throw / raise patterns |
-| `ConditionBlock` | `if / elif / else` chains |
+| `ConditionBlock` | `if / elif / else` chains with recursive IR extraction for each case body |
 | `LoopNode` | `for...of` (FOR_EACH), C-style `for` (FOR_RANGE), Python `for`, Go `range` |
 | `DataTransformation` | `+=`, `-=`, `=`, `:=` assignments |
 | `SideEffect` | Function calls with side effects |
@@ -349,15 +349,15 @@ pip install pytest
 pytest
 ```
 
-408 tests, all green.
+411 tests, all green.
 
 | File | Count | Scope |
 |---|---|---|
-| `tests/test_mapper.py` | 183 | AST → IR mapping unit tests |
+| `tests/test_mapper.py` | 186 | AST → IR mapping unit tests |
 | `tests/test_renderer.py` | 101 | IR → Markdown rendering unit tests |
 | `tests/test_pipeline.py` | 85 | E2E integration tests (TypeScript / Python / Go / PowerShell / Java) |
 | `tests/test_batch.py` | 39 | Batch compile feature tests |
-| **Total** | **408** | **All green** |
+| **Total** | **411** | **All green** |
 
 ---
 
