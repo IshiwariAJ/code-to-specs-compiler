@@ -42,6 +42,10 @@ _EXCLUDED_DIRS: frozenset[str] = frozenset({
     ".tox",
 })
 
+_EXCLUDED_DIR_PREFIXES: tuple[str, ...] = (
+    ".pytest_tmp",
+)
+
 
 # ---------------------------------------------------------------------------
 # データ型
@@ -79,9 +83,15 @@ def collect_source_files(
     Returns:
         見つかったソースファイルのパス tuple（パス文字列順でソート済み）
     """
+    def _is_excluded_dir_name(part: str) -> bool:
+        return part in _EXCLUDED_DIRS or any(
+            part.startswith(prefix)
+            for prefix in _EXCLUDED_DIR_PREFIXES
+        )
+
     def _is_under_excluded_dir(path: Path) -> bool:
         return any(
-            part in _EXCLUDED_DIRS
+            _is_excluded_dir_name(part)
             for part in path.relative_to(project_dir).parts
         )
 

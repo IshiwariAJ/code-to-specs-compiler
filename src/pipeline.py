@@ -7,7 +7,7 @@
 設計方針（構造化プログラミング原則）:
 - この関数はデータを変換するだけ（副作用なし）
 - 各層の実装詳細を隠蔽し、呼び出し順序だけを定義する
-- 新言語追加: src/languages/<言語名>.py を置くだけ。このファイルは変更不要
+- 新言語追加: 既存の中核ファイルを変更せず、言語プラグインを追加できる
 """
 from tree_sitter import Node
 
@@ -21,9 +21,6 @@ from src.renderer.markdown import render_module_spec
 # ---------------------------------------------------------------------------
 
 _PLUGINS: dict[str, LanguagePlugin] = discover_plugins()
-
-_DEFAULT_EXTENSION = ".ts"
-
 
 def get_supported_extensions() -> frozenset[str]:
     """現在サポートしている拡張子の集合を返す。"""
@@ -39,9 +36,18 @@ def select_plugin(extension: str) -> LanguagePlugin:
 
     Returns:
         対応する LanguagePlugin。
-        未知の拡張子はデフォルト（TypeScript）を返す。
+
+    Raises:
+        ValueError: 未対応の拡張子が指定された場合。
     """
-    return _PLUGINS.get(extension, _PLUGINS[_DEFAULT_EXTENSION])
+    if extension in _PLUGINS:
+        return _PLUGINS[extension]
+
+    supported = ", ".join(sorted(_PLUGINS.keys()))
+    raise ValueError(
+        f"サポートされていない拡張子です: {extension or '(拡張子なし)'} "
+        f"対応拡張子: {supported}"
+    )
 
 
 # ---------------------------------------------------------------------------

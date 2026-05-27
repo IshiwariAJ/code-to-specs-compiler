@@ -15,7 +15,7 @@ Phase 4  ██████████ 完了     プロジェクト一括コ�
 Phase 4+ ██████████ 完了     コメント抽出（JSDoc/docstring/インライン）+ __future__ 対応 + OSS公開（Apache 2.0）
 Phase 5A ██████████ 完了     Go 対応（for range / C スタイル for / := / assignment_statement）
 Phase R1 ██████████ 完了     リファクタリング: LanguageProfile 構造フラグ化（profile.name ハードコード撤廃）
-Phase R2 ██████████ 完了     リファクタリング: 言語プラグインシステム（新言語 = 1ファイル追加）
+Phase R2 ██████████ 完了     リファクタリング: 言語プラグインシステム（中核ファイル変更なしで新言語追加）
 Phase R3 ██████████ 完了     Python クラス定義対応（@dataclass / class → クラス定義セクション）
 Phase R4 ██████████ 完了     クラスメソッド抽出対応（クラス内メソッド一覧を仕様書に表示）
 Phase 5B ██████████ 完了     Java 対応（src/languages/java.py 1ファイル追加）
@@ -141,7 +141,7 @@ tests/
 ├── test_mapper.py    ← 当初 39件 → 現在 ~160件: map_source_to_module_spec() 経由で全 IR 型を検証
 ├── test_renderer.py  ← 当初 30件 → 現在 ~90件:  手動 IR 構築でレンダラーを検証
 ├── test_pipeline.py  ← 当初 32件 → 現在 ~60件:  compile_to_spec() の E2E テスト
-└── test_batch.py     ← 37件（Phase 4 以降変化なし）: バッチコンパイル機能の検証
+└── test_batch.py     ← 39件: バッチコンパイル機能の検証
 ```
 
 テストフレームワーク: `pytest 9.0.3`  
@@ -282,7 +282,7 @@ _TYPE_DEF_NODE_EXTRACTOR  ← 言語名 → 型定義抽出関数
 ## Phase R2 — 完了 ✅（リファクタリング）
 
 **完了日**: 2026-05-25  
-**目的**: 新言語対応を「既存ファイルを一切変更せず、1ファイル追加するだけ」で完結できるアーキテクチャに刷新する。
+**目的**: 新言語対応を「既存の中核ファイルを変更せず、言語プラグインとして追加できる」アーキテクチャに刷新する。
 
 ### 問題（R2 前）
 
@@ -520,14 +520,14 @@ class ClassSpec:
 
 ### テスト結果
 
-**403件 全グリーン**（実行時間 0.26s）
+**408件 全グリーン**（実行時間 0.42s）
 
 | テストファイル | 件数 |
 |---|---|
 | `tests/test_mapper.py` | 183件（+38） |
 | `tests/test_renderer.py` | 100件（変化なし）|
 | `tests/test_pipeline.py` | 83件（+22） |
-| `tests/test_batch.py` | 37件（変化なし）|
+| `tests/test_batch.py` | 39件 |
 
 ---
 

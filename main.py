@@ -45,10 +45,11 @@ def _read_source_file(path: Path) -> str:
     if path.suffix not in get_supported_extensions():
         supported = ", ".join(sorted(get_supported_extensions()))
         print(
-            f"警告: サポートされていない拡張子 '{path.suffix}' です。"
+            f"エラー: サポートされていない拡張子 '{path.suffix}' です。"
             f"対応拡張子: {supported}",
             file=sys.stderr,
         )
+        sys.exit(1)
 
     return path.read_text(encoding="utf-8")
 

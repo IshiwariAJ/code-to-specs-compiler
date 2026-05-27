@@ -92,6 +92,16 @@ class TestRenderModuleSpec:
         output = render_module_spec(spec)
         assert "---" in output
 
+    def test_extraction_warnings_are_rendered(self):
+        spec = ModuleSpec(
+            name="Test",
+            functions=(),
+            extraction_warnings=("関数 `f`: while_statement は未対応です",),
+        )
+        output = render_module_spec(spec)
+        assert "抽出警告" in output
+        assert "while_statement" in output
+
 
 # ---------------------------------------------------------------------------
 # GuardClause のレンダリング

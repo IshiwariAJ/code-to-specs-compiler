@@ -196,6 +196,23 @@ class TestEdgeCases:
         result = compile_to_spec("function f() {}", "CustomModuleName", ".ts")
         assert "CustomModuleName" in result
 
+    def test_unsupported_extension_raises_error(self):
+        with pytest.raises(ValueError, match="サポートされていない拡張子"):
+            compile_to_spec("function f() {}", "test", ".js")
+
+    def test_unmapped_statement_warning_is_rendered(self):
+        src = (
+            "function waitUntilReady() {\n"
+            "  while (!ready) {\n"
+            "    poll();\n"
+            "  }\n"
+            "}\n"
+        )
+        result = compile_to_spec(src, "test", ".ts")
+        assert "抽出警告" in result
+        assert "while_statement" in result
+        assert "未対応のため仕様化されませんでした" in result
+
 
 # ---------------------------------------------------------------------------
 # サポート拡張子のテスト

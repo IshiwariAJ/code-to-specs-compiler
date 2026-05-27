@@ -229,6 +229,24 @@ def _render_type_definitions_section(defs: tuple[TypeDefinitionSpec, ...]) -> st
 
 
 # ---------------------------------------------------------------------------
+# レンダリング: 抽出警告
+# ---------------------------------------------------------------------------
+
+
+def _render_extraction_warnings_section(warnings: tuple[str, ...]) -> str:
+    """未対応構文など、仕様化できなかった要素の警告セクションを返す。"""
+    lines = [
+        "## ⚠️ 抽出警告",
+        "",
+        "以下の構文は現在のIRでは仕様化されていません。",
+        "",
+    ]
+    for warning in warnings:
+        lines.append(f"- {warning}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # レンダリング: クラス定義（Python @dataclass 等）
 # ---------------------------------------------------------------------------
 
@@ -652,5 +670,14 @@ def render_module_spec(spec: ModuleSpec) -> str:
             sections.append("")
             sections.append("---")
             sections.append("")
+
+    # 抽出警告セクション
+    if spec.extraction_warnings:
+        if sections[-1] != "":
+            sections.append("")
+        sections.append("---")
+        sections.append("")
+        sections.append(_render_extraction_warnings_section(spec.extraction_warnings))
+        sections.append("")
 
     return "\n".join(sections)

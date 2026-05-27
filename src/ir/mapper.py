@@ -472,7 +472,12 @@ def _is_for_of(for_node: Node) -> bool:
 
 
 def _map_for_each_to_loop(
-    for_node: Node, profile: LanguageProfile, direct_stmt_map: _DirectStmtMap, plugin: "LanguagePlugin"
+    for_node: Node,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
+    warnings: list[str] | None = None,
+    scope: str = "",
 ) -> LoopNode:
     """
     for...of（TypeScript）または for...in（Python）を LoopNode IR（FOR_EACH）に変換する。
@@ -486,7 +491,11 @@ def _map_for_each_to_loop(
 
     iterator = extract_node_text(left_node).strip() if left_node is not None else "item"
     collection = extract_node_text(right_node).strip() if right_node is not None else ""
-    nested_body = _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin) if body_node is not None else []
+    nested_body = (
+        _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin, warnings, scope)
+        if body_node is not None
+        else []
+    )
 
     return LoopNode(
         kind="Loop",
@@ -526,11 +535,20 @@ def _extract_for_range_iterator(for_node: Node) -> str:
 
 
 def _map_for_range_to_loop(
-    for_node: Node, profile: LanguageProfile, direct_stmt_map: _DirectStmtMap, plugin: "LanguagePlugin"
+    for_node: Node,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
+    warnings: list[str] | None = None,
+    scope: str = "",
 ) -> LoopNode:
     """古典的 for 文（TypeScript のみ）を LoopNode IR（FOR_RANGE）に変換する。"""
     body_node = for_node.child_by_field_name("body")
-    nested_body = _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin) if body_node is not None else []
+    nested_body = (
+        _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin, warnings, scope)
+        if body_node is not None
+        else []
+    )
 
     return LoopNode(
         kind="Loop",
@@ -678,6 +696,8 @@ def _map_statement_to_ir(
     profile: LanguageProfile,
     direct_stmt_map: _DirectStmtMap,
     plugin: "LanguagePlugin",
+    warnings: list[str] | None = None,
+    scope: str = "",
 ) -> Optional[IRNode]:
     """
     1つの文ASTノードを profile / plugin を参照して適切な IR ノードに変換する。
@@ -704,19 +724,47 @@ def _map_statement_to_ir(
     elif node_type == profile.for_each_node_type:
         if plugin.for_loop_mapper is not None:
             # 言語固有フック（Go / PowerShell 等）: range_clause 判定など複雑なロジックはプラグイン側で実装
-            body_extractor = lambda body_node: _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin)
+            body_extractor = lambda body_node: _extract_body_ir_nodes(
+                body_node,
+                profile,
+                direct_stmt_map,
+                plugin,
+                warnings,
+                scope,
+            )
             ir_node = plugin.for_loop_mapper(statement_node, body_extractor)
         elif profile.for_loop_flavor == "of_keyword":
             # TypeScript: for_in_statement が for...of かどうかで振り分け
             if not _is_for_of(statement_node):
                 return None  # for...in はスコープ外（Phase 1 定義）
-            ir_node = _map_for_each_to_loop(statement_node, profile, direct_stmt_map, plugin)
+            ir_node = _map_for_each_to_loop(
+                statement_node,
+                profile,
+                direct_stmt_map,
+                plugin,
+                warnings,
+                scope,
+            )
         else:
             # "always_foreach": Python など、常に FOR_EACH
-            ir_node = _map_for_each_to_loop(statement_node, profile, direct_stmt_map, plugin)
+            ir_node = _map_for_each_to_loop(
+                statement_node,
+                profile,
+                direct_stmt_map,
+                plugin,
+                warnings,
+                scope,
+            )
 
     elif profile.for_range_node_type and node_type == profile.for_range_node_type:
-        ir_node = _map_for_range_to_loop(statement_node, profile, direct_stmt_map, plugin)
+        ir_node = _map_for_range_to_loop(
+            statement_node,
+            profile,
+            direct_stmt_map,
+            plugin,
+            warnings,
+            scope,
+        )
 
     elif node_type == "expression_statement":
         ir_node = _map_expression_statement_to_ir(statement_node, profile)
@@ -771,8 +819,22 @@ def _map_statement_to_ir(
 # ---------------------------------------------------------------------------
 
 
+def _format_unmapped_statement_warning(statement: Node, scope: str) -> str:
+    """未抽出の文ノードを、監査しやすい短い警告文に整形する。"""
+    snippet = normalize_whitespace(extract_node_text(statement))
+    if len(snippet) > 120:
+        snippet = snippet[:117].rstrip() + "..."
+    scope_prefix = f"{scope}: " if scope else ""
+    return f"{scope_prefix}{statement.type} は未対応のため仕様化されませんでした: `{snippet}`"
+
+
 def _extract_body_ir_nodes(
-    body_node: Node, profile: LanguageProfile, direct_stmt_map: _DirectStmtMap, plugin: "LanguagePlugin"
+    body_node: Node,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
+    warnings: list[str] | None = None,
+    scope: str = "",
 ) -> list[IRNode]:
     """
     ブロックノード（statement_block / block）から、
@@ -780,9 +842,18 @@ def _extract_body_ir_nodes(
     """
     results: list[IRNode] = []
     for statement in _get_block_statements(body_node, profile):
-        ir_node = _map_statement_to_ir(statement, profile, direct_stmt_map, plugin)
+        ir_node = _map_statement_to_ir(
+            statement,
+            profile,
+            direct_stmt_map,
+            plugin,
+            warnings,
+            scope,
+        )
         if ir_node is not None:
             results.append(ir_node)
+        elif warnings is not None:
+            warnings.append(_format_unmapped_statement_warning(statement, scope))
     return results
 
 
@@ -821,6 +892,7 @@ def _map_function_to_spec(
     profile: LanguageProfile,
     direct_stmt_map: _DirectStmtMap,
     plugin: "LanguagePlugin",
+    warnings: list[str] | None = None,
 ) -> FunctionSpec:
     """関数定義 AST ノードを FunctionSpec IR に変換する。"""
     # 関数名ノードを取得（言語差異を吸収）
@@ -847,7 +919,12 @@ def _map_function_to_spec(
         ) if script_block is not None else None
     else:
         body_node = fn_node.child_by_field_name("body")
-    ir_nodes = _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin) if body_node is not None else []
+    scope = f"関数 `{name}`"
+    ir_nodes = (
+        _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin, warnings, scope)
+        if body_node is not None
+        else []
+    )
 
     return FunctionSpec(
         name=name,
@@ -926,6 +1003,7 @@ def _extract_class_methods(
     class_ast_node: Node,
     plugin: "LanguagePlugin",
     direct_stmt_map: _DirectStmtMap,
+    warnings: list[str] | None = None,
 ) -> tuple[FunctionSpec, ...]:
     """
     クラスボディ内の function_definition ノードを FunctionSpec タプルとして返す。
@@ -939,12 +1017,15 @@ def _extract_class_methods(
     methods: list[FunctionSpec] = []
     for child in body_node.named_children:
         if child.type == plugin.profile.function_node_type:
-            methods.append(_map_function_to_spec(child, plugin.profile, direct_stmt_map, plugin))
+            methods.append(_map_function_to_spec(child, plugin.profile, direct_stmt_map, plugin, warnings))
     return tuple(methods)
 
 
 def _extract_all_class_definitions(
-    root_node: Node, plugin: "LanguagePlugin", direct_stmt_map: _DirectStmtMap
+    root_node: Node,
+    plugin: "LanguagePlugin",
+    direct_stmt_map: _DirectStmtMap,
+    warnings: list[str] | None = None,
 ) -> tuple[ClassSpec, ...]:
     """
     プログラムのトップレベルからクラス定義を収集して返す。
@@ -960,7 +1041,7 @@ def _extract_all_class_definitions(
         if child.type in plugin.profile.class_node_types:
             spec = plugin.class_extractor(child)
             if spec is not None:
-                methods = _extract_class_methods(child, plugin, direct_stmt_map)
+                methods = _extract_class_methods(child, plugin, direct_stmt_map, warnings)
                 if methods:
                     spec = dataclasses.replace(spec, methods=methods)
                 results.append(spec)
@@ -990,6 +1071,7 @@ def map_source_to_module_spec(
     """
     profile = plugin.profile
     direct_stmt_map: _DirectStmtMap = dict(plugin.direct_statement_extractors)
+    warnings: list[str] = []
 
     return ModuleSpec(
         name=module_name,
@@ -997,9 +1079,10 @@ def map_source_to_module_spec(
         imports=_extract_all_imports(root_node, plugin),
         module_variables=_extract_all_module_variables(root_node, plugin),
         type_definitions=_extract_all_type_definitions(root_node, plugin),
-        class_definitions=_extract_all_class_definitions(root_node, plugin, direct_stmt_map),
+        class_definitions=_extract_all_class_definitions(root_node, plugin, direct_stmt_map, warnings),
         functions=tuple(
-            _map_function_to_spec(fn_node, profile, direct_stmt_map, plugin)
+            _map_function_to_spec(fn_node, profile, direct_stmt_map, plugin, warnings)
             for fn_node in _find_top_level_functions(root_node, profile)
         ),
+        extraction_warnings=tuple(dict.fromkeys(warnings)),
     )

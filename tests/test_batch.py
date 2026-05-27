@@ -88,6 +88,18 @@ class TestCollectSourceFiles:
         result = collect_source_files(tmp_path, get_supported_extensions())
         assert all("__pycache__" not in str(p) for p in result)
 
+    def test_excludes_pytest_tmp_directories(self, tmp_path: Path):
+        temp_dir = tmp_path / ".pytest_tmp_verify" / "test_error_file" / "proj"
+        temp_dir.mkdir(parents=True)
+        (temp_dir / "broken.ts").write_text(_TS_SOURCE)
+        (tmp_path / "main.ts").write_text(_TS_SOURCE)
+        result = collect_source_files(tmp_path, get_supported_extensions())
+        assert all(
+            ".pytest_tmp" not in p.relative_to(tmp_path).as_posix()
+            for p in result
+        )
+        assert any(p.name == "main.ts" for p in result)
+
     def test_excludes_venv(self, tmp_path: Path):
         venv = tmp_path / "venv" / "lib"
         venv.mkdir(parents=True)
@@ -247,6 +259,17 @@ class TestCompileProject:
         results = compile_project(project, tmp_path / "out")
         assert len(results) == 1
         assert results[0].source_path.name == "main.ts"
+
+    def test_pytest_tmp_files_are_excluded(self, tmp_path: Path):
+        project = tmp_path / "proj"
+        temp_dir = project / ".pytest_tmp" / "test_error_file" / "proj"
+        temp_dir.mkdir(parents=True)
+        (temp_dir / "broken.ts").write_bytes(b"\xff\xfe broken")
+        (project / "main.ts").write_text(_TS_SOURCE)
+        results = compile_project(project, tmp_path / "out")
+        assert len(results) == 1
+        assert results[0].source_path.name == "main.ts"
+        assert results[0].status == "ok"
 
     def test_error_file_has_error_status(self, tmp_path: Path):
         project = tmp_path / "proj"

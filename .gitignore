@@ -10,6 +10,8 @@ __pycache__/
 
 # pytest / テストキャッシュ
 .pytest_cache/
+.pytest_tmp/
+.pytest_tmp*/
 .coverage
 htmlcov/
 .tox/

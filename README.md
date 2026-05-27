@@ -1,11 +1,11 @@
 # code-to-specs-compiler
 
-**AIを一切使わず、コンパイラ技術（AST解析）だけでソースコードを構造化日本語仕様書に変換するツール。**  
-**A compiler-based tool that converts source code into structured Japanese specification documents — no AI, no hallucination, 100% deterministic.**
+**AIを一切使わず、コンパイラ技術（AST解析）だけで対応済み構文を構造化日本語仕様書に変換するツール。**  
+**A compiler-based tool that converts supported source-code constructs into structured Japanese specification documents — no AI, no hallucination, deterministic output.**
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-403%20passing-brightgreen.svg)](#テスト--testing)
+[![Tests](https://img.shields.io/badge/tests-408%20passing-brightgreen.svg)](#テスト--testing)
 
 ---
 
@@ -13,17 +13,18 @@
 
 ### 概要
 
-`code-to-specs-compiler` は、**ソースコードを決定論的にMarkdown仕様書へ変換する**CLIツールです。  
+`code-to-specs-compiler` は、**対応済み構文を決定論的にMarkdown仕様書へ変換する**CLIツールです。  
 LLMは使用しません。[tree-sitter](https://tree-sitter.github.io/tree-sitter/) によるAST解析と、言語共通のIR（中間表現）を組み合わせた3層パイプラインで動作します。
 
 #### コア価値
 
 | 特長 | 説明 |
 |---|---|
-| 🎯 **ハルシネーションなし** | AIを使わないため、コードに書いていないことが仕様書に現れない |
+| 🎯 **ハルシネーションなし** | AIを使わないため、コード由来でない説明を付加しない |
 | 🔒 **完全ローカル実行** | 機密コード・社内コードも外部送信なしで安全に処理 |
 | 🌐 **多言語・統一フォーマット** | TypeScript / Python / Go / PowerShell / Java から同一Markdownフォーマットで出力 |
-| ⚡ **高速・決定論的** | 同じ入力からは常に同じ出力（403テスト全グリーン） |
+| ⚡ **高速・決定論的** | 同じ入力からは常に同じ出力（408テスト全グリーン） |
+| ⚠️ **未抽出構文を明示** | 現在のIRで仕様化できない関数内構文は抽出警告として出力 |
 
 ---
 
@@ -37,7 +38,7 @@ LLMは使用しません。[tree-sitter](https://tree-sitter.github.io/tree-sitt
 | PowerShell | `.ps1`, `.psm1` | ✅ 対応済み |
 | Java | `.java` | ✅ 対応済み |
 
-新言語の追加は `src/languages/<言語名>.py` を1ファイル作成するだけです（既存ファイルへの変更不要）。
+新言語は、既存の中核ファイル（`mapper.py` / `pipeline.py`）を変更せずに追加できます。通常は `src/parser/<言語名>_parser.py` と `src/languages/<言語名>.py`、依存パッケージ、テスト、サンプルを追加します。
 
 ---
 
@@ -198,6 +199,8 @@ src/languages/<言語名>.py      ← LanguagePlugin 定数を定義するだけ
 
 コメント情報（JSDoc、docstring、インラインコメント）も抽出してブロッククォート形式で出力します。
 
+未対応拡張子はエラーとして扱います。また、対応済みファイル内でも現在のIRが仕様化できない関数内構文は、Markdown末尾の「抽出警告」セクションに表示されます。
+
 ---
 
 ### テスト / Testing
@@ -210,10 +213,10 @@ pytest
 | テストファイル | 件数 | 内容 |
 |---|---|---|
 | `tests/test_mapper.py` | 183件 | AST → IR マッピングのユニットテスト |
-| `tests/test_renderer.py` | 100件 | IR → Markdown レンダリングのユニットテスト |
-| `tests/test_pipeline.py` | 83件 | E2E 統合テスト（TypeScript / Python / Go / PowerShell / Java） |
-| `tests/test_batch.py` | 37件 | バッチコンパイル機能のテスト |
-| **合計** | **403件** | **全グリーン** |
+| `tests/test_renderer.py` | 101件 | IR → Markdown レンダリングのユニットテスト |
+| `tests/test_pipeline.py` | 85件 | E2E 統合テスト（TypeScript / Python / Go / PowerShell / Java） |
+| `tests/test_batch.py` | 39件 | バッチコンパイル機能のテスト |
+| **合計** | **408件** | **全グリーン** |
 
 ---
 
@@ -229,7 +232,7 @@ Copyright 2026 Toshiki Ishiwari
 
 ### Overview
 
-`code-to-specs-compiler` is a CLI tool that **deterministically converts source code into structured Markdown specification documents**.  
+`code-to-specs-compiler` is a CLI tool that **deterministically converts supported source-code constructs into structured Markdown specification documents**.  
 It uses no LLMs — only compiler technology ([tree-sitter](https://tree-sitter.github.io/tree-sitter/) AST analysis) via a 3-layer pipeline.
 
 #### Core Value
@@ -239,7 +242,7 @@ It uses no LLMs — only compiler technology ([tree-sitter](https://tree-sitter.
 | 🎯 **Zero hallucination** | No AI means the spec only contains what the code actually says |
 | 🔒 **Fully local** | Confidential code never leaves your machine |
 | 🌐 **Multi-language, unified format** | TypeScript, Python, Go, PowerShell, and Java all produce the same Markdown structure |
-| ⚡ **Fast & deterministic** | Same input always produces the same output (403 tests passing) |
+| ⚡ **Fast & deterministic** | Same input always produces the same output (408 tests passing) |
 
 ---
 
@@ -253,7 +256,7 @@ It uses no LLMs — only compiler technology ([tree-sitter](https://tree-sitter.
 | PowerShell | `.ps1`, `.psm1` | ✅ Supported |
 | Java | `.java` | ✅ Supported |
 
-Adding a new language requires only one new file (`src/languages/<lang>.py`) — no changes to existing files.
+Adding a new language does not require changes to the core `mapper.py` or `pipeline.py`; in practice, a parser module, a language plugin, dependencies, tests, and examples are usually added together.
 
 ---
 
@@ -346,15 +349,15 @@ pip install pytest
 pytest
 ```
 
-403 tests, all green.
+408 tests, all green.
 
 | File | Count | Scope |
 |---|---|---|
 | `tests/test_mapper.py` | 183 | AST → IR mapping unit tests |
-| `tests/test_renderer.py` | 100 | IR → Markdown rendering unit tests |
-| `tests/test_pipeline.py` | 83 | E2E integration tests (TypeScript / Python / Go / PowerShell / Java) |
-| `tests/test_batch.py` | 37 | Batch compile feature tests |
-| **Total** | **403** | **All green** |
+| `tests/test_renderer.py` | 101 | IR → Markdown rendering unit tests |
+| `tests/test_pipeline.py` | 85 | E2E integration tests (TypeScript / Python / Go / PowerShell / Java) |
+| `tests/test_batch.py` | 39 | Batch compile feature tests |
+| **Total** | **408** | **All green** |
 
 ---
 

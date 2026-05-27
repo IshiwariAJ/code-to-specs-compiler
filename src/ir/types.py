@@ -279,3 +279,4 @@ class ModuleSpec:
     type_definitions: tuple[TypeDefinitionSpec, ...] = ()
     class_definitions: tuple[ClassSpec, ...] = ()
     file_comment: str = ""  # ファイル先頭のコメント / モジュール docstring
+    extraction_warnings: tuple[str, ...] = ()  # 未抽出の構文・文ノードの警告
