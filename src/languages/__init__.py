@@ -19,7 +19,7 @@ from typing import Callable, Optional
 from tree_sitter import Node
 
 from ..ir.profiles import LanguageProfile
-from ..ir.types import ClassSpec, DataTransformation, ImportSpec, ModuleVariableSpec, ParamSpec, TypeDefinitionSpec
+from ..ir.types import ClassSpec, DataTransformation, ImportSpec, IRNode, ModuleVariableSpec, ParamSpec, TypeDefinitionSpec
 
 
 @dataclass(frozen=True)
@@ -52,11 +52,13 @@ class LanguagePlugin:
     # 型定義ノード1つ → TypeDefinitionSpec | None（未対応言語は lambda _: None）
     type_def_extractor: Callable[[Node], Optional[TypeDefinitionSpec]]
 
-    # expression_statement を介さない直接代入文のノードタイプ → 変換関数
+    # expression_statement を介さない直接文のノードタイプ → 変換関数
     # 例: Go の ("assignment_statement", map_go_assignment)
+    #     PowerShell の ("pipeline", map_ps_pipeline_to_ir)
     # TypeScript / Python は空タプルでよい
+    # 戻り値型は DataTransformation に加え SideEffect 等の IRNode も許容する
     direct_statement_extractors: tuple[
-        tuple[str, Callable[[Node], Optional[DataTransformation]]], ...
+        tuple[str, Callable[[Node], Optional[IRNode]]], ...
     ]
 
     # クラス定義ノード1つ → ClassSpec | None

@@ -41,7 +41,8 @@ if TYPE_CHECKING:
     from ..languages import LanguagePlugin
 
 # DirectStmtMap: ノードタイプ → 変換関数（LanguagePlugin から構築）
-_DirectStmtMap = dict[str, Callable[[Node], Optional[DataTransformation]]]
+# DataTransformation のほか SideEffect 等の IRNode を返せるよう Optional[IRNode] に拡張
+_DirectStmtMap = dict[str, Callable[[Node], Optional[IRNode]]]
 
 
 # ---------------------------------------------------------------------------
@@ -129,15 +130,54 @@ def _get_py_function_docstring(fn_node: Node) -> str:
     return extract_node_text(string_node)
 
 
+def _extract_ps_synopsis(comment_text: str) -> str:
+    """
+    PowerShell コメントベースヘルプ（<# .SYNOPSIS ... #>）から .SYNOPSIS の内容を抽出する。
+
+    .SYNOPSIS セクションが存在しない場合はコメント全体（クリーンアップ後）を返す。
+    """
+    lines = comment_text.strip().lstrip("<#").rstrip("#>").strip().splitlines()
+    in_synopsis = False
+    synopsis_lines: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.upper().startswith(".SYNOPSIS"):
+            in_synopsis = True
+            rest = stripped[len(".SYNOPSIS"):].strip()
+            if rest:
+                synopsis_lines.append(rest)
+            continue
+        if in_synopsis:
+            if stripped.startswith("."):
+                break  # 次のセクションが始まった
+            synopsis_lines.append(stripped)
+
+    if synopsis_lines:
+        return " ".join(s for s in synopsis_lines if s)
+    # .SYNOPSIS がなければ先頭行（または空文字）
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("."):
+            return stripped
+    return ""
+
+
 def _get_function_description(fn_node: Node, profile: LanguageProfile) -> str:
     """
     関数の説明文を返す。
 
-    "docstring" スタイル（Python）: 関数本体先頭の文字列リテラル
-    "comment"  スタイル（TypeScript / Go）: 関数直前のコメント
+    "docstring"     スタイル（Python）: 関数本体先頭の文字列リテラル
+    "comment"       スタイル（TypeScript / Go）: 関数直前のコメント
+    "inner_comment" スタイル（PowerShell）: 関数ノードの named_child コメント（<# .SYNOPSIS #>）
     """
     if profile.function_description_style == "docstring":
         return _get_py_function_docstring(fn_node)
+    if profile.function_description_style == "inner_comment":
+        comment_node = next((c for c in fn_node.named_children if c.type == "comment"), None)
+        if comment_node is None:
+            return ""
+        return _extract_ps_synopsis(extract_node_text(comment_node))
     return _get_preceding_comment(fn_node)
 
 
@@ -176,6 +216,20 @@ def _has_child_of_type(node: Node, target_type: str) -> bool:
     return any(child.type == target_type for child in node.children)
 
 
+def _get_if_then_block(if_node: Node, profile: LanguageProfile) -> Optional[Node]:
+    """
+    if 文の then ブロック（consequence）ノードを返す。
+
+    言語差異を吸収する:
+    - consequence_field:    child_by_field_name("consequence")（TypeScript / Python / Go）
+    - statement_block_child: named_children[1] の statement_block（PowerShell）
+    """
+    if profile.if_then_block_access == "statement_block_child":
+        named = if_node.named_children
+        return named[1] if len(named) > 1 else None
+    return if_node.child_by_field_name("consequence")
+
+
 def _is_guard_clause(if_node: Node, profile: LanguageProfile) -> bool:
     """
     if 文がガード句パターンか判定する。
@@ -188,6 +242,14 @@ def _is_guard_clause(if_node: Node, profile: LanguageProfile) -> bool:
     if profile.elif_structure == "nested":
         if if_node.child_by_field_name("alternative") is not None:
             return False
+    elif profile.elif_structure == "elseif_clauses":
+        # PowerShell: elseif_clauses コンテナ または else_clause が named_child にあれば除外
+        has_elif_or_else = any(
+            c.type in ("elseif_clauses", "else_clause")
+            for c in if_node.named_children
+        )
+        if has_elif_or_else:
+            return False
     else:
         # flat (Python): elif_clause or else_clause が兄弟にあれば除外
         has_elif_or_else = any(
@@ -197,7 +259,7 @@ def _is_guard_clause(if_node: Node, profile: LanguageProfile) -> bool:
         if has_elif_or_else:
             return False
 
-    consequence = if_node.child_by_field_name("consequence")
+    consequence = _get_if_then_block(if_node, profile)
     if consequence is None:
         return False
 
@@ -220,6 +282,7 @@ def _extract_guard_action_text(statement_node: Node) -> str:
     TypeScript: return_statement, throw_statement
     Python:     return_statement, raise_statement
     Go:         return_statement
+    PowerShell: flow_control_statement（キーワード子ノードで throw / return を判別）
     """
     value_node = next(
         (child for child in statement_node.named_children),
@@ -242,6 +305,22 @@ def _extract_guard_action_text(statement_node: Node) -> str:
             return f"例外 `{value_text}` を raise して処理を中断する"
         return "例外を raise して処理を中断する"
 
+    # PowerShell: flow_control_statement（throw / return の両方を含む）
+    if statement_node.type == "flow_control_statement":
+        keyword = next(
+            (c for c in statement_node.children if not c.is_named and c.text),
+            None,
+        )
+        keyword_text = keyword.text.decode("utf-8") if keyword and keyword.text else ""
+        if keyword_text == "throw":
+            if value_text:
+                return f"例外 `{value_text}` をスローして処理を中断する"
+            return "例外をスローして処理を中断する"
+        # return（値ありまたは値なし）
+        if value_text:
+            return f"値 `{value_text}` を返して処理を終了する"
+        return "処理を終了する（値なし）"
+
     return extract_node_text(statement_node)
 
 
@@ -254,7 +333,7 @@ def _map_if_to_guard_clause(if_node: Node, profile: LanguageProfile) -> GuardCla
     """ガード句パターンの if 文を GuardClause IR ノードに変換する。"""
     condition_text = _extract_condition_text(if_node)
 
-    consequence = if_node.child_by_field_name("consequence")
+    consequence = _get_if_then_block(if_node, profile)
     statements = _get_block_statements(consequence, profile) if consequence is not None else []
     action_text = _extract_guard_action_text(statements[0]) if statements else ""
 
@@ -290,7 +369,7 @@ def _build_case_from_if(if_node: Node, profile: LanguageProfile) -> CaseNode:
     """if 文の単一ケース（条件と本体アクション）を CaseNode に変換する。"""
     condition_text = _extract_condition_text(if_node)
 
-    consequence = if_node.child_by_field_name("consequence")
+    consequence = _get_if_then_block(if_node, profile)
     action_texts = (
         _extract_case_action_texts(consequence, profile)
         if consequence is not None
@@ -376,10 +455,60 @@ def _collect_all_cases_flat(if_node: Node, profile: LanguageProfile) -> list[Cas
     return cases
 
 
+def _collect_all_cases_elseif_clauses(if_node: Node, profile: LanguageProfile) -> list[CaseNode]:
+    """
+    PowerShell スタイル: elseif_clauses コンテナ + else_clause。
+
+    if_statement の named_children:
+      [0] pipeline       (条件式)
+      [1] statement_block (then ブロック)
+      [2] elseif_clauses  (elseif 節のコンテナ、オプション)
+      [3] else_clause     (else 節、オプション)
+    """
+    named = if_node.named_children
+
+    # then ブロック: named[0] = 条件 pipeline、named[1] = statement_block
+    condition_text = strip_outer_parens(extract_node_text(named[0])) if named else ""
+    then_block = named[1] if len(named) > 1 else None
+    action_texts = _extract_case_action_texts(then_block, profile) if then_block is not None else ()
+    cases: list[CaseNode] = [CaseNode(condition_text=condition_text, action_texts=action_texts)]
+
+    for node in named[2:]:
+        if node.type == "elseif_clauses":
+            for clause in node.named_children:
+                if clause.type != "elseif_clause":
+                    continue
+                # elseif_clause.child_by_field_name("condition") → pipeline（条件）
+                cond_node = clause.child_by_field_name("condition")
+                body_node = clause.named_children[1] if len(clause.named_children) > 1 else None
+                cond_text = (
+                    strip_outer_parens(extract_node_text(cond_node))
+                    if cond_node is not None else ""
+                )
+                elif_actions = (
+                    _extract_case_action_texts(body_node, profile)
+                    if body_node is not None else ()
+                )
+                cases.append(CaseNode(condition_text=cond_text, action_texts=elif_actions))
+
+        elif node.type == "else_clause":
+            # else_clause.named_children[0] = statement_block
+            body = node.named_children[0] if node.named_children else None
+            else_actions = _extract_case_action_texts(body, profile) if body is not None else ()
+            cases.append(CaseNode(
+                condition_text="上記のいずれにも該当しない場合（デフォルト）",
+                action_texts=else_actions,
+            ))
+
+    return cases
+
+
 def _map_if_to_condition_block(if_node: Node, profile: LanguageProfile) -> ConditionBlock:
     """if/else チェーン全体を ConditionBlock IR ノードに変換する。"""
     if profile.elif_structure == "nested":
         cases = _collect_all_cases_nested(if_node, profile)
+    elif profile.elif_structure == "elseif_clauses":
+        cases = _collect_all_cases_elseif_clauses(if_node, profile)
     else:
         cases = _collect_all_cases_flat(if_node, profile)
 
@@ -403,13 +532,23 @@ def _map_for_each_to_loop(
     for_node: Node, profile: LanguageProfile, direct_stmt_map: _DirectStmtMap
 ) -> LoopNode:
     """
-    for...of（TypeScript）または for...in（Python）を LoopNode IR（FOR_EACH）に変換する。
+    for...of（TypeScript）、for...in（Python）、または foreach（PowerShell）を
+    LoopNode IR（FOR_EACH）に変換する。
 
-    tree-sitter のフィールド名は両言語とも left / right / body で統一されている。
+    TypeScript / Python: tree-sitter フィールド名 left / right / body を使用。
+    PowerShell:          named_children[0](variable) / [1](pipeline) / [2](statement_block) を使用。
     """
-    left_node = for_node.child_by_field_name("left")
-    right_node = for_node.child_by_field_name("right")
-    body_node = for_node.child_by_field_name("body")
+    if profile.foreach_access == "var_pipeline_block_children":
+        # PowerShell: foreach ($item in $collection) { ... }
+        fe_named = for_node.named_children
+        left_node = fe_named[0] if len(fe_named) > 0 else None   # variable ($item)
+        right_node = fe_named[1] if len(fe_named) > 1 else None  # pipeline ($items)
+        body_node = fe_named[2] if len(fe_named) > 2 else None   # statement_block
+    else:
+        # TypeScript / Python: フィールド名アクセス
+        left_node = for_node.child_by_field_name("left")
+        right_node = for_node.child_by_field_name("right")
+        body_node = for_node.child_by_field_name("body")
 
     iterator = extract_node_text(left_node).strip() if left_node is not None else "item"
     collection = extract_node_text(right_node).strip() if right_node is not None else ""
@@ -754,7 +893,7 @@ def _map_statement_to_ir(
     elif node_type in profile.lexical_declaration_types:
         ir_node = _map_lexical_declaration_to_ir(statement_node)
 
-    # --- expression_statement を介さない直接代入文（Go 等）---
+    # --- expression_statement を介さない直接代入文（Go / PowerShell 等）---
     elif node_type in profile.direct_statement_types:
         mapper_fn = direct_stmt_map.get(node_type)
         if mapper_fn is not None:
@@ -772,6 +911,18 @@ def _map_statement_to_ir(
             action = "raise"
         else:
             action = "return"
+        ir_node = ReturnNode(kind="ReturnNode", value_text=value_text, action=action)
+
+    # --- PowerShell: flow_control_statement（return / throw を兼ねる）---
+    elif node_type == "flow_control_statement":
+        keyword = next(
+            (c for c in statement_node.children if not c.is_named and c.text),
+            None,
+        )
+        keyword_text = keyword.text.decode("utf-8") if keyword and keyword.text else ""
+        value_node = next((c for c in statement_node.named_children), None)
+        value_text = extract_node_text(value_node).strip() if value_node is not None else ""
+        action = "throw" if keyword_text == "throw" else "return"
         ir_node = ReturnNode(kind="ReturnNode", value_text=value_text, action=action)
 
     if ir_node is None:
@@ -809,10 +960,27 @@ def _extract_body_ir_nodes(
 # ---------------------------------------------------------------------------
 
 
+def _get_top_level_nodes(root_node: Node, profile: LanguageProfile) -> list[Node]:
+    """
+    トップレベルの AST ノードリストを返す。
+
+    多くの言語はルートノードの直接の子にトップレベル宣言を持つ。
+    PowerShell のように program → statement_list → 各宣言 の2段構造の言語は
+    profile.top_level_wrapper_type でラッパーのタイプを指定する。
+    """
+    if profile.top_level_wrapper_type:
+        wrapper = next(
+            (c for c in root_node.named_children if c.type == profile.top_level_wrapper_type),
+            None,
+        )
+        return list(wrapper.named_children) if wrapper is not None else []
+    return list(root_node.named_children)
+
+
 def _find_top_level_functions(root_node: Node, profile: LanguageProfile) -> list[Node]:
-    """プログラムの直接の子から、profile.function_node_type のノードを返す。"""
+    """プログラムのトップレベルから、profile.function_node_type のノードを返す。"""
     return [
-        child for child in root_node.named_children
+        child for child in _get_top_level_nodes(root_node, profile)
         if child.type == profile.function_node_type
     ]
 
@@ -824,10 +992,30 @@ def _map_function_to_spec(
     plugin: "LanguagePlugin",
 ) -> FunctionSpec:
     """関数定義 AST ノードを FunctionSpec IR に変換する。"""
-    name_node = fn_node.child_by_field_name("name")
+    # 関数名ノードを取得（言語差異を吸収）
+    if profile.function_name_access == "function_name_child":
+        # PowerShell: named_child の type == "function_name"
+        name_node = next(
+            (c for c in fn_node.named_children if c.type == "function_name"),
+            None,
+        )
+    else:
+        name_node = fn_node.child_by_field_name("name")
     name = extract_node_text(name_node).strip() if name_node is not None else "anonymous"
 
-    body_node = fn_node.child_by_field_name("body")
+    # 本体ノードを取得（言語差異を吸収）
+    if profile.function_body_access == "script_block_body":
+        # PowerShell: function_statement → script_block → script_block_body
+        script_block = next(
+            (c for c in fn_node.named_children if c.type == "script_block"),
+            None,
+        )
+        body_node = next(
+            (c for c in script_block.named_children if c.type == "script_block_body"),
+            None,
+        ) if script_block is not None else None
+    else:
+        body_node = fn_node.child_by_field_name("body")
     ir_nodes = _extract_body_ir_nodes(body_node, profile, direct_stmt_map) if body_node is not None else []
 
     return FunctionSpec(
@@ -849,7 +1037,7 @@ def _extract_all_imports(
 ) -> tuple[ImportSpec, ...]:
     """プログラムのトップレベルからインポート文を収集して返す。"""
     results: list[ImportSpec] = []
-    for child in root_node.named_children:
+    for child in _get_top_level_nodes(root_node, plugin.profile):
         if child.type in plugin.profile.import_node_types:
             results.extend(plugin.import_extractor(child))
     return tuple(results)
@@ -860,7 +1048,7 @@ def _extract_all_module_variables(
 ) -> tuple[ModuleVariableSpec, ...]:
     """プログラムのトップレベルから変数・定数定義を収集して返す。"""
     results: list[ModuleVariableSpec] = []
-    for child in root_node.named_children:
+    for child in _get_top_level_nodes(root_node, plugin.profile):
         if child.type in plugin.profile.module_var_node_types:
             spec = plugin.module_var_extractor(child)
             if spec is not None:
@@ -879,7 +1067,7 @@ def _extract_all_type_definitions(
         return ()
 
     results: list[TypeDefinitionSpec] = []
-    for child in root_node.named_children:
+    for child in _get_top_level_nodes(root_node, plugin.profile):
         if child.type in target_types:
             spec = plugin.type_def_extractor(child)
             if spec is not None:
@@ -937,7 +1125,7 @@ def _extract_all_class_definitions(
         return ()
 
     results: list[ClassSpec] = []
-    for child in root_node.named_children:
+    for child in _get_top_level_nodes(root_node, plugin.profile):
         if child.type in plugin.profile.class_node_types:
             spec = plugin.class_extractor(child)
             if spec is not None:

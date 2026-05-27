@@ -151,3 +151,36 @@ class LanguageProfile:
     #   class_definition:     素のクラス定義
     # TypeScript / Go → frozenset()（クラスは TypeDefinitionSpec / 将来対応で処理）
     class_node_types: frozenset[str]
+
+    # ---------- 言語固有の AST 構造差異を吸収するフィールド（デフォルト値あり）----------
+
+    # if 文の「then ブロック」ノードへのアクセス方法
+    # "consequence_field":   child_by_field_name("consequence")（TypeScript / Python / Go デフォルト）
+    # "statement_block_child": named_children[1] の statement_block（PowerShell 用）
+    if_then_block_access: str = "consequence_field"
+
+    # 関数定義の「名前」ノードへのアクセス方法
+    # "name_field":          child_by_field_name("name")（TypeScript / Python / Go デフォルト）
+    # "function_name_child": type == "function_name" の named_child（PowerShell 用）
+    function_name_access: str = "name_field"
+
+    # 関数定義の「本体」ノードへのアクセス方法
+    # "body_field":          child_by_field_name("body")（TypeScript / Python / Go デフォルト）
+    # "script_block_body":   script_block → script_block_body（PowerShell 用）
+    function_body_access: str = "body_field"
+
+    # foreach 文の変数・コレクション・本体へのアクセス方法
+    # "left_right_body_fields": child_by_field_name(left/right/body)（TypeScript / Python デフォルト）
+    # "var_pipeline_block_children": named_children[0,1,2]（PowerShell 用）
+    foreach_access: str = "left_right_body_fields"
+
+    # 関数説明コメントのアクセス方法（function_description_style の拡張）
+    # "comment":       直前の sibling コメント（TypeScript / Go デフォルト）
+    # "docstring":     関数本体先頭の文字列リテラル（Python）
+    # "inner_comment": 関数ノードの named_child コメント（PowerShell: <# .SYNOPSIS ... #>）
+    # ※ function_description_style フィールドと重複するが、そちらは既存コードとの互換性のため温存
+
+    # トップレベルのラッパーノードタイプ（""=ルート直下に関数が存在）
+    # "" (デフォルト): root_node.named_children から直接検索
+    # "statement_list": root → statement_list → 関数（PowerShell 用）
+    top_level_wrapper_type: str = ""

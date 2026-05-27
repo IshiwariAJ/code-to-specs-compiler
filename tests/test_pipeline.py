@@ -307,6 +307,122 @@ class TestGoE2E:
             assert marker in go_result, f"Go 出力に {marker} がない"
             assert marker in ts_result, f"TS 出力に {marker} がない"
 
+
+# ---------------------------------------------------------------------------
+# PowerShell 言語 E2E テスト
+# ---------------------------------------------------------------------------
+
+_PS_SOURCE = (
+    "function Get-Benefit {\n"
+    "    <#\n"
+    "    .SYNOPSIS\n"
+    "    特典ポイントを計算する\n"
+    "    #>\n"
+    "    param(\n"
+    "        [string]$Status,\n"
+    "        [int]$Total\n"
+    "    )\n"
+    "    if (-not $Status) {\n"
+    '        throw "Status is required"\n'
+    "    }\n"
+    '    if ($Status -ne "ACTIVE") {\n'
+    "        return 0\n"
+    "    }\n"
+    "    foreach ($item in $items) {\n"
+    "        Write-Output $item\n"
+    "    }\n"
+    "    if ($Total -gt 100000) {\n"
+    "        return 1000\n"
+    "    } elseif ($Total -gt 10000) {\n"
+    "        return 500\n"
+    "    } else {\n"
+    "        return 100\n"
+    "    }\n"
+    "}\n"
+)
+
+
+class TestPowerShellE2E:
+    """PowerShell ソースコードの E2E 変換テスト"""
+
+    def test_ps1_compiles_without_error(self):
+        result = compile_to_spec(_PS_SOURCE, "test", ".ps1")
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_psm1_compiles_without_error(self):
+        result = compile_to_spec(_PS_SOURCE, "test", ".psm1")
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_ps1_is_supported_extension(self):
+        assert ".ps1" in get_supported_extensions()
+
+    def test_psm1_is_supported_extension(self):
+        assert ".psm1" in get_supported_extensions()
+
+    def test_output_contains_module_header(self):
+        result = compile_to_spec(_PS_SOURCE, "sample", ".ps1")
+        assert "# モジュール仕様: sample" in result
+
+    def test_output_contains_function_name(self):
+        result = compile_to_spec(_PS_SOURCE, "test", ".ps1")
+        assert "Get-Benefit" in result
+
+    def test_output_contains_synopsis_description(self):
+        result = compile_to_spec(_PS_SOURCE, "test", ".ps1")
+        assert "特典ポイントを計算する" in result
+
+    def test_output_contains_params(self):
+        result = compile_to_spec(_PS_SOURCE, "test", ".ps1")
+        assert "$Status" in result
+        assert "string" in result
+
+    def test_output_contains_throw_guard_clause(self):
+        result = compile_to_spec(_PS_SOURCE, "test", ".ps1")
+        assert "前提条件（ガード句）" in result
+        assert "スローして処理を中断する" in result
+
+    def test_output_contains_return_guard_clause(self):
+        result = compile_to_spec(_PS_SOURCE, "test", ".ps1")
+        assert "処理を終了する" in result
+
+    def test_output_contains_foreach_loop(self):
+        result = compile_to_spec(_PS_SOURCE, "test", ".ps1")
+        assert "繰り返し処理" in result
+        assert "$item" in result
+
+    def test_output_contains_condition_block(self):
+        result = compile_to_spec(_PS_SOURCE, "test", ".ps1")
+        assert "条件分岐" in result
+
+    def test_output_contains_elseif_case(self):
+        result = compile_to_spec(_PS_SOURCE, "test", ".ps1")
+        # elseif 節が ConditionBlock の 2つ目のケースとして現れる
+        assert "$Total -gt 10000" in result
+
+    def test_output_contains_else_default_case(self):
+        result = compile_to_spec(_PS_SOURCE, "test", ".ps1")
+        assert "上記のいずれにも該当しない場合" in result
+
+    def test_ps_same_structural_markers_as_typescript(self):
+        """PowerShell と TypeScript が同一の構造マーカーを出力することを確認（Universal IR の実証）"""
+        ps_result = compile_to_spec(_PS_SOURCE, "test", ".ps1")
+        ts_source = (
+            "function getBenefit(status, total, items) {\n"
+            '  if (!status) { throw new Error("required"); }\n'
+            '  if (status !== "ACTIVE") { return 0; }\n'
+            "  for (const item of items) { console.log(item); }\n"
+            "  if (total > 100000) { return 1000; }\n"
+            "  else if (total > 10000) { return 500; }\n"
+            "  else { return 100; }\n"
+            "}\n"
+        )
+        ts_result = compile_to_spec(ts_source, "test", ".ts")
+        for marker in ["前提条件（ガード句）", "繰り返し処理", "条件分岐"]:
+            assert marker in ps_result, f"PS 出力に {marker} がない"
+            assert marker in ts_result, f"TS 出力に {marker} がない"
+
     def test_go_c_style_for_loop(self):
         src = (
             "package main\n"
