@@ -124,12 +124,16 @@ class ClassSpec:
         class LanguageProfile:
             \"\"\"...\"\"\"\
             name: str  # 説明
+
+    注: methods は FunctionSpec のタプルだが、FunctionSpec はこのクラスより後に定義される。
+        from __future__ import annotations により文字列アノテーションとして扱われるため問題なし。
     """
     kind: Literal["ClassSpec"]
     name: str
     is_dataclass: bool     # @dataclass デコレータを持つか
     description: str = ""  # クラス docstring
     fields: tuple[ClassFieldSpec, ...] = ()
+    methods: tuple[FunctionSpec, ...] = ()  # type: ignore[misc]  # 前方参照（実行時に解決される）
 
 
 # ---------------------------------------------------------------------------

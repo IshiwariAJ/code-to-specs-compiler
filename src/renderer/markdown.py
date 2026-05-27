@@ -257,8 +257,18 @@ def _render_class_spec(spec: ClassSpec) -> str:
         ])
         for field in spec.fields:
             lines.append(_render_class_field_row(field))
-    else:
-        lines.append("*（フィールド定義が検出されませんでした）*")
+    # フィールドがない場合は何も追加しない（メソッドのみのクラスも正常なパターン）
+
+    if spec.methods:
+        if spec.fields:
+            lines.append("")  # フィールドテーブルとの間にスペース
+        lines.append("**メソッド:**")
+        lines.append("")
+        for method in spec.methods:
+            if method.description:
+                lines.append(f"* `{method.name}` — {method.description}")
+            else:
+                lines.append(f"* `{method.name}`")
 
     return "\n".join(lines)
 

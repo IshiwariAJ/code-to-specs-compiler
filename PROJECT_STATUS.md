@@ -1,6 +1,6 @@
 # 自然言語コンパイラ — プロジェクト進捗管理
 
-最終更新: 2026-05-25（Python @dataclass / class 対応 完了: クラス定義がMarkdown仕様書に出力）
+最終更新: 2026-05-25（クラスメソッド抽出対応 完了: クラス内のメソッド一覧がMarkdown仕様書に出力）
 
 ---
 
@@ -17,6 +17,7 @@ Phase 5A ██████████ 完了     Go 対応（for range / C ス
 Phase R1 ██████████ 完了     リファクタリング: LanguageProfile 構造フラグ化（profile.name ハードコード撤廃）
 Phase R2 ██████████ 完了     リファクタリング: 言語プラグインシステム（新言語 = 1ファイル追加）
 Phase R3 ██████████ 完了     Python クラス定義対応（@dataclass / class → クラス定義セクション）
+Phase R4 ██████████ 完了     クラスメソッド抽出対応（クラス内メソッド一覧を仕様書に表示）
 Phase 5B ░░░░░░░░░░ 未着手   Java 対応
 ```
 
@@ -144,7 +145,7 @@ tests/
 
 テストフレームワーク: `pytest 9.0.3`  
 当初: **138件 全グリーン**（実行時間 0.15s）  
-現在（Phase R3 完了時点）: **319件 全グリーン**（実行時間 0.21s）
+現在（Phase R4 完了時点）: **328件 全グリーン**（実行時間 0.30s）
 
 ---
 
@@ -339,7 +340,7 @@ class LanguagePlugin:
 ```
 
 **285件 全グリーン**（実行時間 0.25s）  
-※ Phase R3 完了後は **319件**。
+※ Phase R4 完了後は **328件**。
 
 ---
 
@@ -360,7 +361,13 @@ class LanguagePlugin:
 | 型名 | 意味 |
 |---|---|
 | `ClassFieldSpec` | クラスの1フィールド（名前・型・デフォルト値・インラインコメント）|
-| `ClassSpec` | クラス定義全体（名前・is_dataclass フラグ・docstring・フィールド列）|
+| `ClassSpec` | クラス定義全体（名前・is_dataclass フラグ・docstring・フィールド列・メソッド列）|
+
+`ClassSpec` のフィールド:
+```python
+fields:   tuple[ClassFieldSpec, ...] = ()  # 型アノテーション付きフィールド（@dataclass 等）
+methods:  tuple[FunctionSpec, ...] = ()    # クラス内メソッド一覧（R4 追加）
+```
 
 `ModuleSpec` に `class_definitions: tuple[ClassSpec, ...] = ()` フィールドを追加。
 
@@ -412,6 +419,66 @@ class LanguagePlugin:
 
 ---
 
+## Phase R4 — 完了 ✅（クラスメソッド抽出対応）
+
+**完了日**: 2026-05-25  
+**目的**: クラス定義セクションの中身が空になっていた問題を解決し、クラス内のメソッド一覧を仕様書に表示する。
+
+### 問題（R4 前）
+
+- クラス定義セクションにクラス名しか表示されず中身が空だった（特にメソッドのみのクラス）
+- フィールドがないクラスで「*（フィールド定義が検出されませんでした）*」という誤解を招くメッセージが出ていた
+
+### 実装内容
+
+#### ① `src/ir/types.py` — `ClassSpec` に `methods` フィールド追加
+
+```python
+@dataclass(frozen=True)
+class ClassSpec:
+    ...
+    fields:  tuple[ClassFieldSpec, ...] = ()
+    methods: tuple[FunctionSpec, ...] = ()  # ← R4 追加
+```
+
+`from __future__ import annotations` により、`FunctionSpec` は文字列アノテーションとして前方参照が可能。
+
+#### ② `src/ir/mapper.py` — クラスボディからメソッドを抽出する関数を追加
+
+| 関数 | 役割 |
+|---|---|
+| `_get_class_body_node(class_ast_node)` | `decorated_definition` / `class_definition` の両方から body ブロックを返す |
+| `_extract_class_methods(class_ast_node, profile, direct_stmt_map)` | body 内の `function_definition` ノードを `FunctionSpec` に変換して返す |
+
+`_extract_all_class_definitions()` が `direct_stmt_map` を受け取るように更新し、抽出したメソッドを `dataclasses.replace()` で `ClassSpec` に付与する。
+
+#### ③ `src/renderer/markdown.py` — クラス内メソッド一覧の描画
+
+```markdown
+### 🏛️ `TestModuleSpec` (class)
+
+**メソッド:**
+
+* `test_module_name_is_preserved`
+* `test_empty_typescript_function_has_no_body_nodes`
+* `do_something` — データを処理する。   ← docstring がある場合は inline 表示
+```
+
+- `fields` あり → フィールドテーブルを表示
+- `methods` あり → `**メソッド:**` 見出し + 箇条書き
+- どちらもなし → 何も表示しない（プレースホルダーメッセージ廃止）
+
+### テスト追加
+
+| テストクラス | 件数 | 内容 |
+|---|---|---|
+| `TestPyClassDefinition` に追加 (test_mapper.py) | 3件 | メソッド抽出・docstring 付きメソッド・フィールドとメソッド共存 |
+| `TestRenderClassDefinitions` に追加 (test_renderer.py) | 4件 | メソッド一覧描画・説明付き・フィールドと共存・空メソッドの非表示 |
+
+**328件 全グリーン**（実行時間 0.30s）
+
+---
+
 ## 未来のフェーズ（参考）
 
 | フェーズ | 内容 |
@@ -423,13 +490,14 @@ class LanguagePlugin:
 
 ## 既知の制限事項
 
-1. **アロー関数・メソッドは未対応**: `const fn = () => {}` や クラスメソッドは検出しない
-2. **ネストした関数は未対応**: 内部関数宣言は無視される
-3. **型情報なし**: 変数の型（`User`, `number` 等）は仕様書に含まれない
-4. **変数名依存**: 意味不明な変数名（`x`, `tmp`）の場合、出力も意味不明になる
-5. **Go の for ループ関数は mapper.py に残存**: for-range / for-clause 関数は `_extract_body_ir_nodes` に依存するため循環インポート回避のため `mapper.py` に保持している
-6. **Python クラスのフィールド説明はインラインコメントのみ取得**: `name: str  # 説明` の形式のみ対応。フィールド前の複数行ブロックコメントは仕様上無視する（次フィールドの前置コメントと区別できないため）
-7. **TypeScript / Go のクラス定義は未対応**: TypeScript `class` / Go の `struct` は将来フェーズで対応予定
+1. **アロー関数は未対応**: `const fn = () => {}` 形式の関数は検出しない（TypeScript のみ）
+2. **クラスメソッドの本体は展開しない**: メソッド名一覧は表示するが、メソッド内の処理フロー（ガード句・ループ等）は出力しない（トップレベル関数と同等の展開は将来対応予定）
+3. **ネストした関数は未対応**: 内部関数宣言は無視される
+4. **型情報なし**: 変数の型（`User`, `number` 等）は仕様書に含まれない
+5. **変数名依存**: 意味不明な変数名（`x`, `tmp`）の場合、出力も意味不明になる
+6. **Go の for ループ関数は mapper.py に残存**: for-range / for-clause 関数は `_extract_body_ir_nodes` に依存するため循環インポート回避のため `mapper.py` に保持している
+7. **Python クラスのフィールド説明はインラインコメントのみ取得**: `name: str  # 説明` の形式のみ対応。フィールド前の複数行ブロックコメントは仕様上無視する（次フィールドの前置コメントと区別できないため）
+8. **TypeScript / Go のクラス定義は未対応**: TypeScript `class` / Go の `struct` は将来フェーズで対応予定
 
 ---
 

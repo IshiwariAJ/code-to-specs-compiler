@@ -1275,3 +1275,75 @@ class TestPyClassDefinition:
         )
         spec = _py_module(src)
         assert "frozenset[str]" in spec.class_definitions[0].fields[0].type_text
+
+    def test_method_only_class_extracted_with_no_fields(self):
+        """メソッドのみのクラス（型アノテーション付きフィールドなし・非 dataclass）も
+        class_definitions に含まれる。フィールドが空なだけでクラスとして抽出する。
+        レンダラー側でフィールドなしの場合はプレースホルダーを出さずに正しく表示する。"""
+        src = (
+            "class TestConfig:\n"
+            "    def test_something(self): pass\n"
+            "    def test_other(self): pass\n"
+        )
+        spec = _py_module(src)
+        assert len(spec.class_definitions) == 1
+        assert spec.class_definitions[0].name == "TestConfig"
+        assert spec.class_definitions[0].is_dataclass is False
+        assert len(spec.class_definitions[0].fields) == 0
+
+    def test_dataclass_with_no_fields_extracted(self):
+        """@dataclass が付いているクラスは、フィールドがなくても class_definitions に含まれる。
+        フィールドなし dataclass は有効なパターン（frozen=True の空コンテナ等）。"""
+        src = (
+            "@dataclass(frozen=True)\n"
+            "class Empty:\n"
+            "    pass\n"
+        )
+        spec = _py_module(src)
+        assert len(spec.class_definitions) == 1
+        assert spec.class_definitions[0].name == "Empty"
+        assert spec.class_definitions[0].is_dataclass is True
+        assert len(spec.class_definitions[0].fields) == 0
+
+    def test_class_methods_extracted(self):
+        """クラス内のメソッドが ClassSpec.methods に含まれる。"""
+        src = (
+            "class TestFoo:\n"
+            "    def test_one(self): pass\n"
+            "    def test_two(self): pass\n"
+            "    def test_three(self): pass\n"
+        )
+        spec = _py_module(src)
+        cls = spec.class_definitions[0]
+        assert len(cls.methods) == 3
+        method_names = [m.name for m in cls.methods]
+        assert method_names == ["test_one", "test_two", "test_three"]
+
+    def test_class_method_with_docstring(self):
+        """docstring 付きメソッドの description が FunctionSpec に抽出される。"""
+        src = (
+            "class MyClass:\n"
+            '    def do_something(self):\n'
+            '        """何かを実行する。"""\n'
+            "        pass\n"
+        )
+        spec = _py_module(src)
+        method = spec.class_definitions[0].methods[0]
+        assert method.name == "do_something"
+        assert "何かを実行する" in method.description
+
+    def test_dataclass_with_fields_and_methods(self):
+        """フィールドとメソッドが共存するクラスで両方が抽出される。"""
+        src = (
+            "@dataclass\n"
+            "class Config:\n"
+            "    host: str\n"
+            "    port: int = 8080\n"
+            "    def validate(self): pass\n"
+            "    def reset(self): pass\n"
+        )
+        spec = _py_module(src)
+        cls = spec.class_definitions[0]
+        assert len(cls.fields) == 2
+        assert len(cls.methods) == 2
+        assert [m.name for m in cls.methods] == ["validate", "reset"]

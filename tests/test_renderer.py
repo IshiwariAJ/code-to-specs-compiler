@@ -756,10 +756,13 @@ class TestRenderClassDefinitions:
         # テーブルヘッダー行の "説明" 列直下に "—" がある
         assert "| — |" in output
 
-    def test_no_fields_shows_placeholder(self):
+    def test_no_fields_renders_without_placeholder(self):
+        """フィールドがないクラスは、クラス名のみを表示し誤解を招くプレースホルダーを出さない。"""
         cls = ClassSpec(kind="ClassSpec", name="EmptyClass", is_dataclass=True, fields=())
         output = render_module_spec(_make_class_module(cls))
-        assert "フィールド定義が検出されませんでした" in output
+        assert "EmptyClass" in output
+        assert "フィールド定義が検出されませんでした" not in output
+        assert "フィールド名" not in output  # テーブルヘッダーも出ない
 
     def test_class_section_appears_before_function_section(self):
         field = ClassFieldSpec(name="x", type_text="int")
@@ -789,3 +792,44 @@ class TestRenderClassDefinitions:
         spec = ModuleSpec(name="Test", functions=())
         output = render_module_spec(spec)
         assert "🏛️ クラス定義" not in output
+
+    def test_class_methods_rendered_as_list(self):
+        """クラスのメソッドが「メソッド:」見出し付きの箇条書きで表示される。"""
+        method_a = FunctionSpec(name="do_something", body=())
+        method_b = FunctionSpec(name="validate", body=())
+        cls = ClassSpec(
+            kind="ClassSpec", name="MyClass", is_dataclass=False,
+            methods=(method_a, method_b),
+        )
+        output = render_module_spec(_make_class_module(cls))
+        assert "**メソッド:**" in output
+        assert "* `do_something`" in output
+        assert "* `validate`" in output
+
+    def test_class_method_with_description_shown_inline(self):
+        """description 付きメソッドは「`名前` — 説明」形式で表示される。"""
+        method = FunctionSpec(name="process", body=(), description="データを処理する。")
+        cls = ClassSpec(
+            kind="ClassSpec", name="Processor", is_dataclass=False,
+            methods=(method,),
+        )
+        output = render_module_spec(_make_class_module(cls))
+        assert "* `process` — データを処理する。" in output
+
+    def test_fields_and_methods_both_rendered(self):
+        """フィールドとメソッドが共存するクラスで両方が出力される。"""
+        field = ClassFieldSpec(name="host", type_text="str")
+        method = FunctionSpec(name="connect", body=())
+        cls = ClassSpec(
+            kind="ClassSpec", name="Client", is_dataclass=True,
+            fields=(field,), methods=(method,),
+        )
+        output = render_module_spec(_make_class_module(cls))
+        assert "| `host` |" in output       # フィールドテーブル
+        assert "* `connect`" in output       # メソッド一覧
+
+    def test_no_methods_section_when_empty(self):
+        """methods=() の場合は「メソッド:」見出しが出力されない。"""
+        cls = ClassSpec(kind="ClassSpec", name="Data", is_dataclass=True)
+        output = render_module_spec(_make_class_module(cls))
+        assert "**メソッド:**" not in output

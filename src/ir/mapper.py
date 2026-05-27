@@ -887,13 +887,51 @@ def _extract_all_type_definitions(
     return tuple(results)
 
 
+def _get_class_body_node(class_ast_node: Node) -> Optional[Node]:
+    """
+    クラス定義 AST ノードから body ブロックを返す。
+
+    Python の decorated_definition（@dataclass 等）と class_definition の両方に対応する:
+      - decorated_definition → definition (class_definition) → body
+      - class_definition     → body
+    """
+    if class_ast_node.type == "decorated_definition":
+        definition = class_ast_node.child_by_field_name("definition")
+        if definition is None:
+            return None
+        return definition.child_by_field_name("body")
+    return class_ast_node.child_by_field_name("body")
+
+
+def _extract_class_methods(
+    class_ast_node: Node,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+) -> tuple[FunctionSpec, ...]:
+    """
+    クラスボディ内の function_definition ノードを FunctionSpec タプルとして返す。
+
+    メソッド本体の IR は top-level 関数と同じロジックで変換する。
+    """
+    body_node = _get_class_body_node(class_ast_node)
+    if body_node is None:
+        return ()
+
+    methods: list[FunctionSpec] = []
+    for child in body_node.named_children:
+        if child.type == profile.function_node_type:
+            methods.append(_map_function_to_spec(child, profile, direct_stmt_map))
+    return tuple(methods)
+
+
 def _extract_all_class_definitions(
-    root_node: Node, plugin: "LanguagePlugin"
+    root_node: Node, plugin: "LanguagePlugin", direct_stmt_map: _DirectStmtMap
 ) -> tuple[ClassSpec, ...]:
     """
     プログラムのトップレベルからクラス定義を収集して返す。
 
     profile.class_node_types が空の言語（TypeScript / Go 等）は即座に空タプルを返す。
+    各クラスのメソッドは _extract_class_methods() で抽出し、ClassSpec に付与する。
     """
     if not plugin.profile.class_node_types:
         return ()
@@ -903,6 +941,9 @@ def _extract_all_class_definitions(
         if child.type in plugin.profile.class_node_types:
             spec = plugin.class_extractor(child)
             if spec is not None:
+                methods = _extract_class_methods(child, plugin.profile, direct_stmt_map)
+                if methods:
+                    spec = dataclasses.replace(spec, methods=methods)
                 results.append(spec)
     return tuple(results)
 
@@ -937,7 +978,7 @@ def map_source_to_module_spec(
         imports=_extract_all_imports(root_node, plugin),
         module_variables=_extract_all_module_variables(root_node, plugin),
         type_definitions=_extract_all_type_definitions(root_node, plugin),
-        class_definitions=_extract_all_class_definitions(root_node, plugin),
+        class_definitions=_extract_all_class_definitions(root_node, plugin, direct_stmt_map),
         functions=tuple(
             _map_function_to_spec(fn_node, profile, direct_stmt_map, plugin)
             for fn_node in _find_top_level_functions(root_node, profile)
