@@ -6,19 +6,21 @@
 
 公開インターフェース:
     parse_go_source(source_code: str) -> Node
+
+設計方針:
+- tree-sitter-go は lazy import（未インストール環境でのインポートエラーを防ぐ）
 """
 from __future__ import annotations
 
-import tree_sitter_go
-from tree_sitter import Language, Node, Parser
-
-_GO_LANGUAGE = Language(tree_sitter_go.language())
-_GO_PARSER = Parser(_GO_LANGUAGE)
+from tree_sitter import Node
 
 
 def parse_go_source(source_code: str) -> Node:
     """
     Go ソースコード文字列を tree-sitter でパースし、AST のルートノードを返す。
+
+    tree-sitter-go パッケージは呼び出し時に初めてインポートする。
+    インストールされていない場合は ImportError が発生する。
 
     Args:
         source_code: Go ソースコード（UTF-8 文字列）
@@ -26,5 +28,10 @@ def parse_go_source(source_code: str) -> Node:
     Returns:
         tree-sitter の source_file ルートノード
     """
-    tree = _GO_PARSER.parse(source_code.encode("utf-8"))
+    import tree_sitter_go
+    from tree_sitter import Language, Parser
+
+    language = Language(tree_sitter_go.language())
+    parser = Parser(language)
+    tree = parser.parse(source_code.encode("utf-8"))
     return tree.root_node

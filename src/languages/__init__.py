@@ -80,13 +80,21 @@ def discover_plugins() -> dict[str, LanguagePlugin]:
 
     新言語対応モジュールは自動的に検出される。
     アンダースコアで始まるモジュール（__init__.py 等）はスキップする。
+
+    言語パッケージ（tree-sitter-go 等）がインストールされていない場合は
+    ImportError を静かにスキップし、インストール済みの言語のみ登録する。
+    これにより、必要な言語のパッケージだけをインストールして使用できる。
     """
     plugins: dict[str, LanguagePlugin] = {}
     package_dir = Path(__file__).parent
     for mod_info in pkgutil.iter_modules([str(package_dir)]):
         if mod_info.name.startswith("_"):
             continue
-        module = importlib.import_module(f".{mod_info.name}", package=__package__)
+        try:
+            module = importlib.import_module(f".{mod_info.name}", package=__package__)
+        except ImportError:
+            # 言語パッケージ未インストールの場合はスキップ
+            continue
         if hasattr(module, "PLUGIN"):
             plugin: LanguagePlugin = module.PLUGIN
             for ext in plugin.extensions:

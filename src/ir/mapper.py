@@ -905,7 +905,7 @@ def _get_class_body_node(class_ast_node: Node) -> Optional[Node]:
 
 def _extract_class_methods(
     class_ast_node: Node,
-    profile: LanguageProfile,
+    plugin: "LanguagePlugin",
     direct_stmt_map: _DirectStmtMap,
 ) -> tuple[FunctionSpec, ...]:
     """
@@ -919,8 +919,8 @@ def _extract_class_methods(
 
     methods: list[FunctionSpec] = []
     for child in body_node.named_children:
-        if child.type == profile.function_node_type:
-            methods.append(_map_function_to_spec(child, profile, direct_stmt_map))
+        if child.type == plugin.profile.function_node_type:
+            methods.append(_map_function_to_spec(child, plugin.profile, direct_stmt_map, plugin))
     return tuple(methods)
 
 
@@ -941,7 +941,7 @@ def _extract_all_class_definitions(
         if child.type in plugin.profile.class_node_types:
             spec = plugin.class_extractor(child)
             if spec is not None:
-                methods = _extract_class_methods(child, plugin.profile, direct_stmt_map)
+                methods = _extract_class_methods(child, plugin, direct_stmt_map)
                 if methods:
                     spec = dataclasses.replace(spec, methods=methods)
                 results.append(spec)

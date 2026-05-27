@@ -8,19 +8,17 @@
 - 副作用なし（ファイルI/Oや状態保持はしない）
 - 入力: ソースコード文字列 / 出力: ASTのルートノード
 - ts_parser.py と同一のインターフェース設計（フロントエンドの交換可能性を実証）
+- tree-sitter-python は lazy import（未インストール環境でのインポートエラーを防ぐ）
 """
-import tree_sitter_python
-from tree_sitter import Language, Node, Parser
-
-
-def _create_python_language() -> Language:
-    """Python 言語オブジェクトを生成して返す。"""
-    return Language(tree_sitter_python.language())
+from tree_sitter import Node
 
 
 def parse_python_source(source_code: str) -> Node:
     """
     Python ソースコード文字列を解析し、ASTのルートノードを返す。
+
+    tree-sitter-python パッケージは呼び出し時に初めてインポートする。
+    インストールされていない場合は ImportError が発生する。
 
     Args:
         source_code: Python のソースコード文字列
@@ -28,7 +26,10 @@ def parse_python_source(source_code: str) -> Node:
     Returns:
         tree-sitter の AST ルートノード（module ノード）
     """
-    language = _create_python_language()
+    import tree_sitter_python
+    from tree_sitter import Language, Parser
+
+    language = Language(tree_sitter_python.language())
     parser = Parser(language)
     tree = parser.parse(source_code.encode("utf-8"))
     return tree.root_node
