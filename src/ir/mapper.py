@@ -34,6 +34,7 @@ from .types import (
     ParamSpec,
     ReturnNode,
     SideEffect,
+    TryCatchNode,
     TypeDefinitionSpec,
 )
 
@@ -571,6 +572,144 @@ def _map_if_to_condition_block(
 
 
 # ---------------------------------------------------------------------------
+# マッピング: try / catch / finally → TryCatchNode IR
+# ---------------------------------------------------------------------------
+
+
+_TRY_BODY_NODE_TYPES = {"block", "statement_block", "script_block_body"}
+
+
+def _first_named_descendant_of_type(node: Node, node_type: str) -> Optional[Node]:
+    """Return the first named descendant with the requested tree-sitter type."""
+    for child in node.named_children:
+        if child.type == node_type:
+            return child
+        found = _first_named_descendant_of_type(child, node_type)
+        if found is not None:
+            return found
+    return None
+
+
+def _last_identifier_text(node: Node) -> str:
+    """Return the last identifier-like token below a node."""
+    result = ""
+    for child in node.named_children:
+        if child.type in {"identifier", "variable"}:
+            result = extract_node_text(child).strip()
+        nested = _last_identifier_text(child)
+        if nested:
+            result = nested
+    return result
+
+
+def _first_try_body_node(node: Node) -> Optional[Node]:
+    """Return the direct body block for try/catch/finally-like nodes."""
+    body = node.child_by_field_name("body")
+    if body is not None and body.type in _TRY_BODY_NODE_TYPES:
+        return body
+
+    return next(
+        (child for child in node.named_children if child.type in _TRY_BODY_NODE_TYPES),
+        None,
+    )
+
+
+def _iter_catch_clauses(try_node: Node) -> list[Node]:
+    """Return catch/except clauses directly attached to a try_statement."""
+    clauses: list[Node] = []
+    for child in try_node.named_children:
+        if child.type in {"catch_clause", "except_clause"}:
+            clauses.append(child)
+        elif child.type == "catch_clauses":
+            clauses.extend(c for c in child.named_children if c.type == "catch_clause")
+    return clauses
+
+
+def _extract_catch_var(catch_node: Node) -> str:
+    """Extract catch variable text across TypeScript, Python, Java and PowerShell."""
+    parameter = catch_node.child_by_field_name("parameter")
+    if parameter is not None:
+        return extract_node_text(parameter).strip()
+
+    alias = _first_named_descendant_of_type(catch_node, "as_pattern_target")
+    if alias is not None:
+        return extract_node_text(alias).strip()
+
+    for param_type in ("catch_formal_parameter", "formal_parameter"):
+        param = next((c for c in catch_node.named_children if c.type == param_type), None)
+        if param is not None:
+            name = param.child_by_field_name("name")
+            if name is not None:
+                return extract_node_text(name).strip()
+            return _last_identifier_text(param)
+
+    value = catch_node.child_by_field_name("value")
+    if value is not None:
+        return extract_node_text(value).strip()
+
+    return ""
+
+
+def _map_try_to_ir(
+    try_node: Node,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
+    warnings: list[str] | None,
+    scope: str,
+) -> TryCatchNode:
+    """Convert a try_statement into a TryCatchNode with nested IR bodies."""
+    try_body_node = _first_try_body_node(try_node)
+    try_body = _extract_case_body_ir_nodes(
+        try_body_node,
+        profile,
+        direct_stmt_map,
+        plugin,
+        warnings,
+        scope,
+    )
+
+    catch_clauses = _iter_catch_clauses(try_node)
+    catch_node = catch_clauses[0] if catch_clauses else None
+    catch_body_node = _first_try_body_node(catch_node) if catch_node is not None else None
+    catch_body = _extract_case_body_ir_nodes(
+        catch_body_node,
+        profile,
+        direct_stmt_map,
+        plugin,
+        warnings,
+        scope,
+    )
+
+    finalizer = try_node.child_by_field_name("finalizer")
+    if finalizer is None:
+        finalizer = next(
+            (child for child in try_node.named_children if child.type == "finally_clause"),
+            None,
+        )
+    finally_body_node = _first_try_body_node(finalizer) if finalizer is not None else None
+    finally_body = _extract_case_body_ir_nodes(
+        finally_body_node,
+        profile,
+        direct_stmt_map,
+        plugin,
+        warnings,
+        scope,
+    )
+
+    if warnings is not None and len(catch_clauses) > 1:
+        warnings.append(f"{scope}: try_statement は最初の catch / except 節のみ仕様化しました")
+
+    return TryCatchNode(
+        kind="TryCatchNode",
+        try_body=try_body,
+        catch_var=_extract_catch_var(catch_node) if catch_node is not None else "",
+        catch_body=catch_body,
+        finally_body=finally_body,
+    )
+
+
+# ---------------------------------------------------------------------------
 # マッピング: for ループ → LoopNode IR（TypeScript / Python 共通）
 # ---------------------------------------------------------------------------
 
@@ -836,6 +975,16 @@ def _map_statement_to_ir(
                 warnings,
                 scope,
             )
+
+    elif node_type == "try_statement":
+        ir_node = _map_try_to_ir(
+            statement_node,
+            profile,
+            direct_stmt_map,
+            plugin,
+            warnings,
+            scope,
+        )
 
     elif node_type == profile.for_each_node_type:
         if plugin.for_loop_mapper is not None:

@@ -65,7 +65,7 @@
 
 ---
 
-#### ③ try / catch / finally
+#### ~~③ try / catch / finally~~ ✅ 実装済み（2026-05-27）
 
 **問題**: 例外処理が IR に存在しないため、エラーハンドリングが出力から完全に消える。
 
@@ -81,7 +81,7 @@ try {
 }
 ```
 
-**追加する IR**:
+**実装済み IR**:
 ```python
 @dataclass(frozen=True)
 class TryCatchNode:
@@ -93,9 +93,14 @@ class TryCatchNode:
     comment: str = ""
 ```
 
+**実装内容**: `TryCatchNode` を追加し、TypeScript / Python / Java / PowerShell の
+`try_statement` から `try_body` / `catch_body` / `finally_body` を再帰IRとして抽出する。
+`catch (error)`、`except ... as error`、Java の `catch (Exception error)` の変数名も
+`catch_var` に保持する。
+
 **期待する出力例**:
 ```markdown
-### N. 🛡️ 例外処理
+### N. 例外処理
 * **try ブロック:**
   * 🔔 副作用: `fetch(url)` の結果を `result` に代入する
 * **catch ブロック (`error`):**
@@ -317,7 +322,7 @@ Step 13 ⑬ 分割代入
 |---|---|---|---|---|---|
 | ~~① 引数・戻り値~~ ✅ | ParamSpec 追加 / FunctionSpec 拡張 | _map_function_to_spec 拡張 | TS / Py / Go 全対応 | params テーブル・return_type 追加 | 既存319件グリーン維持 |
 | ~~② return 文~~ ✅ | ReturnNode 追加 / IRNode 拡張 | return/throw/raise ハンドリング追加 | 変更なし（全言語共通） | _render_return_node 追加 | 既存319件グリーン維持 |
-| ③ try/catch | TryCatchNode 追加 | 全言語 | TS / Py / Go | TryCatchNode レンダリング追加 | 追加 |
+| ~~③ try/catch~~ ✅ | TryCatchNode 追加 / IRNode 拡張 | `try_statement` ハンドリング追加 | TS / Py / Java / PowerShell | TryCatchNode レンダリング追加 | 追加済み |
 | ④ while | LoopNode 変更 | 全言語 | TS / Py / Go | LoopNode レンダリング更新 | 追加 |
 | ⑤ アロー関数 | 変更なし | — | TS のみ | 変更なし | 追加 |
 | ⑥ クラスメソッド | ClassSpec 拡張 | — | 全言語 | ClassSpec レンダリング更新 | 追加 |

@@ -21,10 +21,12 @@ from src.ir.types import (
     ModuleVariableSpec,
     ReturnNode,
     SideEffect,
+    TryCatchNode,
     TypeDefinitionSpec,
 )
 from src.languages.go import PLUGIN as GO_PLUGIN
 from src.languages.java import PLUGIN as JAVA_PLUGIN
+from src.languages.powershell import PLUGIN as POWERSHELL_PLUGIN
 from src.languages.python import PLUGIN as PYTHON_PLUGIN
 from src.languages.typescript import PLUGIN as TYPESCRIPT_PLUGIN
 
@@ -52,6 +54,12 @@ def _go_module(source: str) -> ModuleSpec:
     return map_source_to_module_spec(root, "test", GO_PLUGIN)
 
 
+def _ps_module(source: str) -> ModuleSpec:
+    """PowerShell スニペットを解析して ModuleSpec を返す純粋ヘルパー。"""
+    root = POWERSHELL_PLUGIN.parse_source(source)
+    return map_source_to_module_spec(root, "test", POWERSHELL_PLUGIN)
+
+
 def _ts_body(source: str) -> tuple:
     """TypeScript スニペットの最初の関数の IR ノード列を返す。"""
     return _ts_module(source).functions[0].body
@@ -60,6 +68,11 @@ def _ts_body(source: str) -> tuple:
 def _py_body(source: str) -> tuple:
     """Python スニペットの最初の関数の IR ノード列を返す。"""
     return _py_module(source).functions[0].body
+
+
+def _ps_body(source: str) -> tuple:
+    """PowerShell スニペットの最初の関数の IR ノード列を返す。"""
+    return _ps_module(source).functions[0].body
 
 
 # ---------------------------------------------------------------------------
@@ -271,6 +284,89 @@ class TestConditionBlock:
         condition = _ts_body(src)[0]
         assert isinstance(condition.cases[0].body[0], SideEffect)
         assert condition.cases[0].body[0].description == "notify(user)"
+
+
+# ---------------------------------------------------------------------------
+# 例外処理（TryCatchNode）の検出
+# ---------------------------------------------------------------------------
+
+
+class TestTryCatchNode:
+    def test_typescript_try_catch_finally_is_try_catch_node(self):
+        src = (
+            "function f() {"
+            " try { const x = work(); }"
+            " catch (error) { log(error); throw error; }"
+            " finally { cleanup(); }"
+            "}"
+        )
+        body = _ts_body(src)
+        assert isinstance(body[0], TryCatchNode)
+
+    def test_typescript_try_body_contains_nested_ir(self):
+        src = (
+            "function f() {"
+            " try { const x = work(); }"
+            " catch (error) { log(error); }"
+            "}"
+        )
+        node = _ts_body(src)[0]
+        assert isinstance(node.try_body[0], DataTransformation)
+        assert node.try_body[0].target == "x"
+
+    def test_typescript_catch_var_and_body_are_extracted(self):
+        src = (
+            "function f() {"
+            " try { work(); }"
+            " catch (error) { log(error); throw error; }"
+            "}"
+        )
+        node = _ts_body(src)[0]
+        assert node.catch_var == "error"
+        assert isinstance(node.catch_body[0], SideEffect)
+        assert isinstance(node.catch_body[1], ReturnNode)
+        assert node.catch_body[1].action == "throw"
+
+    def test_typescript_finally_body_is_extracted(self):
+        src = (
+            "function f() {"
+            " try { work(); }"
+            " catch (error) { log(error); }"
+            " finally { cleanup(); }"
+            "}"
+        )
+        node = _ts_body(src)[0]
+        assert isinstance(node.finally_body[0], SideEffect)
+        assert node.finally_body[0].description == "cleanup()"
+
+    def test_python_except_alias_is_catch_var(self):
+        src = (
+            "def f():\n"
+            "    try:\n"
+            "        x = work()\n"
+            "    except ValueError as error:\n"
+            "        log(error)\n"
+            "        raise error\n"
+        )
+        node = _py_body(src)[0]
+        assert isinstance(node, TryCatchNode)
+        assert node.catch_var == "error"
+        assert isinstance(node.catch_body[1], ReturnNode)
+        assert node.catch_body[1].action == "raise"
+
+    def test_powershell_try_catch_finally_is_extracted(self):
+        src = (
+            "function f {"
+            " try { $x = work }"
+            " catch { Write-Error $_; throw $_ }"
+            " finally { cleanup }"
+            "}"
+        )
+        node = _ps_body(src)[0]
+        assert isinstance(node, TryCatchNode)
+        assert isinstance(node.try_body[0], DataTransformation)
+        assert isinstance(node.catch_body[0], SideEffect)
+        assert isinstance(node.finally_body[0], SideEffect)
 
 
 # ---------------------------------------------------------------------------
@@ -1837,3 +1933,25 @@ class TestJavaConditionBlock:
         )
         body = _java_class_body(src)
         assert "デフォルト" in body[0].cases[1].condition_text
+
+
+class TestJavaTryCatchNode:
+    """Java の try/catch/finally が TryCatchNode に変換されることを検証する。"""
+
+    def test_java_try_catch_finally_is_extracted(self):
+        src = (
+            "public class Svc {\n"
+            "    public void f() {\n"
+            "        try { int x = work(); }\n"
+            "        catch (Exception error) { log(error); throw error; }\n"
+            "        finally { cleanup(); }\n"
+            "    }\n"
+            "}\n"
+        )
+        node = _java_class_body(src)[0]
+        assert isinstance(node, TryCatchNode)
+        assert node.catch_var == "error"
+        assert isinstance(node.try_body[0], DataTransformation)
+        assert isinstance(node.catch_body[0], SideEffect)
+        assert isinstance(node.catch_body[1], ReturnNode)
+        assert isinstance(node.finally_body[0], SideEffect)

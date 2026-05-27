@@ -1,74 +1,124 @@
-// ユーザー特典計算モジュール（設計書のサンプルコードを TypeScript で実装したもの）
+// Kitchen sink TypeScript sample.
+// Purpose: compile supported constructs and expose unsupported constructs as warnings.
 
-// モジュール定数（ModuleVariableSpec のサンプル）
+import { readFile } from "fs/promises";
+
 const MAX_POINTS = 1000;
 const PREMIUM_THRESHOLD = 100000;
+let auditCounter = 0;
 
-// 型定義（TypeDefinitionSpec のサンプル）
 type UserStatus = "ACTIVE" | "INACTIVE" | "BANNED";
+type BenefitLevel = "premium" | "standard" | "basic";
+
+interface Purchase {
+  price: number;
+  category?: string;
+}
 
 interface User {
+  id: string;
   status: UserStatus;
   rank: string;
-  purchaseHistory: { price: number }[];
+  purchaseHistory: Purchase[];
+  metadata?: Record<string, unknown>;
 }
 
 interface BenefitResult {
   points: number;
   message: string;
+  level: BenefitLevel;
+}
+
+class AuditLog {
+  private entries: string[] = [];
+
+  add(message: string): void {
+    this.entries.push(message);
+  }
 }
 
 /**
- * ユーザーの購入履歴からポイント特典を計算して返す
+ * Supported-heavy function: guards, loops, data transforms, try/catch/finally and condition chains.
  */
-function calculateUserBenefit(user: User): BenefitResult {
-  // ガード句: 無効なユーザーは即座に弾く
+async function calculateUserBenefit(
+  user: User,
+  options: { configPath?: string; dryRun?: boolean } = {},
+  ...tags: string[]
+): Promise<BenefitResult> {
   if (user.status !== "ACTIVE") {
-    throw new Error("エラー: 無効なユーザーです");
+    throw new Error("inactive user");
   }
 
-  // 購入履歴を合計する
   let totalAmount = 0;
   for (const history of user.purchaseHistory) {
     totalAmount += history.price;
   }
 
-  // 合計金額とランクに応じて特典を決定する
-  if (totalAmount >= PREMIUM_THRESHOLD && user.rank === "Gold") {
-    return { points: MAX_POINTS, message: "プレミアム特典付与" };
+  for (let i = 0; i < tags.length; i++) {
+    console.log(tags[i]);
+  }
+
+  try {
+    const configText = await readFile(options.configPath ?? "config.json", "utf8");
+    console.log(configText);
+  } catch (error) {
+    console.error(error);
+    throw error;
+  } finally {
+    auditCounter += 1;
+    console.log("benefit calculation finished");
+  }
+
+  if (options.dryRun) {
+    return { points: 0, message: "dry run", level: "basic" };
+  } else if (totalAmount >= PREMIUM_THRESHOLD && user.rank === "Gold") {
+    return { points: MAX_POINTS, message: "premium benefit", level: "premium" };
   } else if (totalAmount >= 50000) {
-    return { points: 500, message: "シルバー特典付与" };
+    return { points: 500, message: "standard benefit", level: "standard" };
   } else {
-    return { points: 100, message: "通常特典付与" };
+    return { points: 100, message: "basic benefit", level: "basic" };
   }
 }
 
-function validateScore(score: number): string {
-  // ガード句: スコアが範囲外なら即時エラー
-  if (score < 0 || score > 100) {
-    throw new RangeError("スコアは0〜100の範囲で指定してください");
-  }
-
-  if (score >= 90) {
-    return "S";
-  } else if (score >= 80) {
-    return "A";
-  } else if (score >= 70) {
-    return "B";
-  } else {
-    return "C以下";
-  }
-}
-
-function sumArray(numbers: number[]): number {
-  // ガード句: 空配列は0を返す
-  if (numbers.length === 0) {
-    return 0;
-  }
-
+/**
+ * Unsupported-heavy function: these constructs should be visible as extraction warnings today.
+ */
+function inspectUnsupportedFlow(user: User, values: number[]): number {
+  let index = 0;
   let total = 0;
-  for (let i = 0; i < numbers.length; i++) {
-    total += numbers[i];
+
+  while (index < values.length) {
+    total += values[index];
+    index += 1;
   }
-  return total;
+
+  do {
+    total -= 1;
+  } while (total > 1000);
+
+  switch (user.status) {
+    case "ACTIVE":
+      total += 10;
+      break;
+    case "BANNED":
+      total -= 100;
+      break;
+    default:
+      total += 0;
+  }
+
+  for (const key in user.metadata ?? {}) {
+    console.log(key);
+  }
+
+  const [first = 0, ...rest] = values;
+  const { rank = "None" } = user;
+  const normalized = rest.map((value) => value * 2).filter((value) => value > first);
+  const label = total > 0 ? `rank:${rank}` : "none";
+  console.log(label);
+
+  return normalized.reduce((sum, value) => sum + value, total);
 }
+
+const arrowBenefit = (value: number): number => (value > 0 ? value : 0);
+

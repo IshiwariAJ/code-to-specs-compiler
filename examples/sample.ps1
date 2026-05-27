@@ -1,100 +1,108 @@
-# ユーザー特典計算モジュール（PowerShell 版）
-# TypeScript / Python / Go 版と意図的に同一ロジックを実装し、
-# Universal IR の多言語対応を実証するサンプルスクリプトです。
+# Kitchen sink PowerShell sample.
+# Purpose: compile supported constructs and expose unsupported constructs as warnings.
+
+$Script:MaxPoints = 1000
+$Script:PremiumThreshold = 100000
+$Script:AuditCounter = 0
+
+class Purchase {
+    [int]$Price
+    [string]$Category
+
+    Purchase([int]$price, [string]$category) {
+        $this.Price = $price
+        $this.Category = $category
+    }
+}
 
 function Get-UserBenefit {
     <#
     .SYNOPSIS
-    ユーザーの購入履歴からポイント特典を計算して返す
-    .DESCRIPTION
-    アクティブなユーザーの購入合計金額とランクに応じて
-    付与ポイント数とメッセージを返します。
+    Supported-heavy function with guards, loops, try/catch/finally and condition chains.
     #>
     param(
         [string]$Status,
         [string]$Rank,
-        [object[]]$PurchaseHistory
+        [object[]]$PurchaseHistory,
+        [switch]$DryRun
     )
 
-    # ガード句: 無効なユーザーは即座に弾く
     if ($Status -ne "ACTIVE") {
-        throw "エラー: 無効なユーザーです"
+        throw "inactive user"
     }
 
-    # 購入履歴を合計する
     $totalAmount = 0
     foreach ($history in $PurchaseHistory) {
         $totalAmount += $history.Price
     }
 
-    # ランクと合計金額に応じて特典を決定する
-    if ($totalAmount -ge 100000 -and $Rank -eq "Gold") {
-        return @{ Points = 1000; Message = "プレミアム特典付与" }
+    try {
+        $configText = Get-Content -Path "config.json" -ErrorAction Stop
+        Write-Output $configText
+    } catch {
+        Write-Error $_
+        throw $_
+    } finally {
+        $Script:AuditCounter += 1
+        Write-Output "benefit calculation finished"
+    }
+
+    if ($DryRun) {
+        return @{ Points = 0; Message = "dry run"; Level = "basic" }
+    } elseif ($totalAmount -ge $Script:PremiumThreshold -and $Rank -eq "Gold") {
+        return @{ Points = $Script:MaxPoints; Message = "premium benefit"; Level = "premium" }
     } elseif ($totalAmount -ge 50000) {
-        return @{ Points = 500; Message = "シルバー特典付与" }
+        return @{ Points = 500; Message = "standard benefit"; Level = "standard" }
     } else {
-        return @{ Points = 100; Message = "通常特典付与" }
+        return @{ Points = 100; Message = "basic benefit"; Level = "basic" }
     }
 }
 
-
-function Test-Score {
+function Inspect-UnsupportedFlow {
     <#
     .SYNOPSIS
-    スコアを評価してグレード文字列を返す
+    Unsupported-heavy function for extraction warning checks.
     #>
     param(
-        [int]$Score
+        [hashtable]$User,
+        [int[]]$Values
     )
 
-    # ガード句: スコアが範囲外なら即時エラー
-    if ($Score -lt 0 -or $Score -gt 100) {
-        throw "スコアは0〜100の範囲で指定してください"
-    }
-
-    if ($Score -ge 90) {
-        return "S"
-    } elseif ($Score -ge 80) {
-        return "A"
-    } elseif ($Score -ge 70) {
-        return "B"
-    } else {
-        return "C以下"
-    }
-}
-
-
-function Get-ArraySum {
-    <#
-    .SYNOPSIS
-    数値配列の合計を計算して返す
-    #>
-    param(
-        [int[]]$Numbers
-    )
-
-    # ガード句: 空配列は 0 を返す
-    if ($Numbers.Count -eq 0) {
-        return 0
-    }
-
+    $index = 0
     $total = 0
-    foreach ($n in $Numbers) {
-        $total += $n
+
+    while ($index -lt $Values.Count) {
+        $total += $Values[$index]
+        $index += 1
     }
+
+    do {
+        $total -= 1
+    } until ($total -le 1000)
+
+    for ($i = 0; $i -lt $Values.Count; $i++) {
+        if ($Values[$i] -lt 0) {
+            continue
+        }
+        $total += $Values[$i]
+    }
+
+    switch ($User.Status) {
+        "ACTIVE" { $total += 10 }
+        "BANNED" { $total -= 100 }
+        default { $total += 0 }
+    }
+
+    $Values |
+        Where-Object { $_ -gt 0 } |
+        ForEach-Object { Write-Output $_ }
+
     return $total
 }
 
-
-function Write-Result {
-    <#
-    .SYNOPSIS
-    特典計算結果を標準出力に表示する
-    #>
-    param(
-        [hashtable]$Result
-    )
-
-    Write-Output "ポイント: $($Result.Points)"
-    Write-Output "メッセージ: $($Result.Message)"
+filter Select-Positive {
+    if ($_ -gt 0) {
+        $_
+    }
 }
+

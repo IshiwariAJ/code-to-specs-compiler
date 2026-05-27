@@ -1,71 +1,112 @@
-# ユーザー特典計算モジュール（TypeScript 版の sample.ts と意図的に同一ロジック）
-# 同じロジックが TypeScript と Python で同一フォーマットの仕様書に変換されることを実証する
+"""Kitchen sink Python sample.
+
+Purpose: compile supported constructs and expose unsupported constructs as warnings.
+"""
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any
 
-# モジュール定数（ModuleVariableSpec のサンプル）
+
 MAX_POINTS = 1000
 PREMIUM_THRESHOLD = 100000
+audit_counter = 0
+
+
+@dataclass(frozen=True)
+class Purchase:
+    price: int
+    category: str = "general"
 
 
 @dataclass(frozen=True)
 class BenefitResult:
-    """特典計算の結果を保持する不変データクラス。"""
-    points: int        # 付与ポイント数
-    message: str       # ユーザー向けメッセージ
-    rank: str = ""     # 適用されたランク名（省略可能）
+    points: int
+    message: str
+    level: str
+    tags: tuple[str, ...] = field(default_factory=tuple)
 
 
-@dataclass(frozen=True)
-class ScoreGrade:
-    """スコア評価結果を保持する不変データクラス。"""
-    score: int         # 元のスコア（0〜100）
-    grade: str         # 評価グレード（S / A / B / C以下）
-    is_passing: bool = True  # 合格判定
+class AuditLog:
+    """Plain class sample with methods."""
+
+    def __init__(self) -> None:
+        self.entries: list[str] = []
+
+    def add(self, message: str) -> None:
+        self.entries.append(message)
 
 
-def calculate_user_benefit(user):
-    """ユーザーの購入履歴からポイント特典を計算して返す。"""
-    # ガード句: 無効なユーザーは即座に弾く
+def calculate_user_benefit(
+    user: dict[str, Any],
+    purchases: list[Purchase],
+    dry_run: bool = False,
+    *tags: str,
+) -> dict[str, Any]:
+    """Supported-heavy function: guards, loops, data transforms, try/except/finally and condition chains."""
     if user["status"] != "ACTIVE":
-        raise ValueError("エラー: 無効なユーザーです")
+        raise ValueError("inactive user")
 
-    # 購入履歴を合計する
     total_amount = 0
-    for history in user["purchase_history"]:
-        total_amount += history["price"]
+    for purchase in purchases:
+        total_amount += purchase.price
 
-    # 合計金額とランクに応じて特典を決定する
-    if total_amount >= PREMIUM_THRESHOLD and user["rank"] == "Gold":
-        return {"points": 1000, "message": "プレミアム特典付与"}
+    try:
+        config_text = Path("config.json").read_text(encoding="utf-8")
+        print(config_text)
+    except OSError as error:
+        print(error)
+        raise error
+    finally:
+        print("benefit calculation finished")
+
+    if dry_run:
+        return {"points": 0, "message": "dry run", "level": "basic", "tags": tags}
+    elif total_amount >= PREMIUM_THRESHOLD and user["rank"] == "Gold":
+        return {"points": MAX_POINTS, "message": "premium benefit", "level": "premium", "tags": tags}
     elif total_amount >= 50000:
-        return {"points": 500, "message": "シルバー特典付与"}
+        return {"points": 500, "message": "standard benefit", "level": "standard", "tags": tags}
     else:
-        return {"points": 100, "message": "通常特典付与"}
+        return {"points": 100, "message": "basic benefit", "level": "basic", "tags": tags}
 
 
-def validate_score(score):
-    # ガード句: スコアが範囲外なら即時エラー
-    if score < 0 or score > 100:
-        raise ValueError("スコアは0〜100の範囲で指定してください")
-
-    if score >= 90:
-        return "S"
-    elif score >= 80:
-        return "A"
-    elif score >= 70:
-        return "B"
-    else:
-        return "C以下"
-
-
-def sum_array(numbers):
-    # ガード句: 空リストは0を返す
-    if len(numbers) == 0:
-        return 0
-
+def inspect_unsupported_flow(user: dict[str, Any], values: list[int]) -> int:
+    """Unsupported-heavy function: these constructs should be visible as extraction warnings today."""
+    index = 0
     total = 0
-    for n in numbers:
-        total += n
-    return total
+
+    while index < len(values):
+        total += values[index]
+        index += 1
+
+    match user.get("status"):
+        case "ACTIVE":
+            total += 10
+        case "BANNED":
+            total -= 100
+        case _:
+            total += 0
+
+    with open("audit.log", "a", encoding="utf-8") as file:
+        file.write("checked\n")
+
+    first, *rest = values
+    normalized = [value * 2 for value in rest if value > first]
+    label = f"rank:{user.get('rank', 'None')}" if total > 0 else "none"
+    callback = lambda value: value + 1
+    print(label)
+
+    return sum(callback(value) for value in normalized) + total
+
+
+async def fetch_remote_points(user_id: str) -> int:
+    await asyncio.sleep(0)
+    return len(user_id)
+
+
+def stream_points(values: list[int]):
+    for value in values:
+        yield value
+

@@ -1,5 +1,5 @@
-// Package main は自然言語コンパイラのサンプルです（Go 版）。
-// TypeScript 版・Python 版と同一ロジックを実装し、Universal IR の多言語対応を実証します。
+// Package main is a kitchen sink Go sample.
+// Purpose: compile supported constructs and expose unsupported constructs as warnings.
 package main
 
 import (
@@ -7,42 +7,109 @@ import (
 	"fmt"
 )
 
-// MAX_POINTS は最大付与ポイント数
-const MAX_POINTS = 1000
+const MaxPoints = 1000
+const PremiumThreshold = 100000
 
-// calculateUserBenefit はユーザーの特典ポイントを計算する
-func calculateUserBenefit(user User) (BenefitResult, error) {
-	// アクティブユーザーのみ処理する
+var auditCounter = 0
+
+type Purchase struct {
+	Price    int
+	Category string
+}
+
+type User struct {
+	ID              string
+	Status          string
+	Rank            string
+	PurchaseHistory []Purchase
+	Metadata        map[string]string
+}
+
+type BenefitResult struct {
+	Points  int
+	Message string
+	Level   string
+}
+
+type Notifier interface {
+	Notify(message string) error
+}
+
+// calculateUserBenefit is the supported-heavy function.
+func calculateUserBenefit(user User, dryRun bool, tags ...string) (BenefitResult, error) {
 	if user.Status != "ACTIVE" {
-		return BenefitResult{}, errors.New("エラー: 無効なユーザーです")
+		return BenefitResult{}, errors.New("inactive user")
 	}
+
 	totalAmount := 0
 	for _, history := range user.PurchaseHistory {
 		totalAmount += history.Price
 	}
-	// ランクに応じてポイントを付与
-	if totalAmount >= 100000 && user.Rank == "Gold" {
-		return BenefitResult{Points: 1000, Message: "プレミアム特典付与"}, nil
+
+	for i := 0; i < len(tags); i++ {
+		fmt.Println(tags[i])
+	}
+
+	defer fmt.Println("benefit calculation finished")
+
+	if dryRun {
+		return BenefitResult{Points: 0, Message: "dry run", Level: "basic"}, nil
+	} else if totalAmount >= PremiumThreshold && user.Rank == "Gold" {
+		return BenefitResult{Points: MaxPoints, Message: "premium benefit", Level: "premium"}, nil
 	} else if totalAmount >= 50000 {
-		return BenefitResult{Points: 500, Message: "シルバー特典付与"}, nil
+		return BenefitResult{Points: 500, Message: "standard benefit", Level: "standard"}, nil
 	} else {
-		return BenefitResult{Points: 100, Message: "通常特典付与"}, nil
+		return BenefitResult{Points: 100, Message: "basic benefit", Level: "basic"}, nil
 	}
 }
 
-// printResult は計算結果を標準出力に表示する
-func printResult(result BenefitResult) {
-	fmt.Printf("ポイント: %d\n", result.Points)
-	fmt.Printf("メッセージ: %s\n", result.Message)
+// inspectUnsupportedFlow includes unsupported control-flow forms for warning checks.
+func inspectUnsupportedFlow(user User, values []int, ch chan int) int {
+	index := 0
+	total := 0
+
+	for index < len(values) {
+		total += values[index]
+		index++
+	}
+
+	switch user.Status {
+	case "ACTIVE":
+		total += 10
+	case "BANNED":
+		total -= 100
+	default:
+		total += 0
+	}
+
+	select {
+	case value := <-ch:
+		total += value
+	default:
+		total += 0
+	}
+
+	go func() {
+		fmt.Println("background audit")
+	}()
+
+	func(label string) {
+		fmt.Println(label)
+	}("anonymous function")
+
+	for key, value := range user.Metadata {
+		fmt.Println(key, value)
+	}
+
+	return total
 }
 
-// countInRange は指定範囲内の件数をカウントする（C スタイル for のサンプル）
-func countInRange(values []int, threshold int) int {
-	count := 0
-	for i := 0; i < len(values); i++ {
-		if values[i] > threshold {
-			count += 1
+func recoverableWork() {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println(err)
 		}
-	}
-	return count
+	}()
+	panic("boom")
 }
+

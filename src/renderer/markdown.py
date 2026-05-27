@@ -29,6 +29,7 @@ from src.ir.types import (
     ParamSpec,
     ReturnNode,
     SideEffect,
+    TryCatchNode,
     TypeDefinitionSpec,
 )
 
@@ -517,6 +518,50 @@ def _render_loop_node(node: LoopNode, index: int) -> str:
 
 
 # ---------------------------------------------------------------------------
+# レンダリング: TryCatchNode
+# ---------------------------------------------------------------------------
+
+
+def _render_try_body_block(label: str, body: tuple[IRNode, ...]) -> list[str]:
+    """Render one try/catch/finally body section."""
+    lines = [f"* **{label}:**"]
+    if not body:
+        lines.append("  * （検出された処理はありません）")
+        return lines
+
+    for nested_node in body:
+        nested_text = _render_ir_node(nested_node, index=0)
+        lines.append(_indent_lines(nested_text, indent="  "))
+    return lines
+
+
+def _render_try_catch_node(node: TryCatchNode, index: int) -> str:
+    """TryCatchNode IR ノードを Markdown テキストに変換する。"""
+    lines = [
+        f"### {index}. 例外処理"
+        if index > 0
+        else "* 例外処理"
+    ]
+    if node.comment:
+        comment_line = _render_comment_blockquote(node.comment)
+        if comment_line:
+            lines.append(comment_line)
+
+    lines.extend(_render_try_body_block("try ブロック", node.try_body))
+
+    if node.catch_body or node.catch_var:
+        catch_label = "catch ブロック"
+        if node.catch_var:
+            catch_label += f" (`{node.catch_var}`)"
+        lines.extend(_render_try_body_block(catch_label, node.catch_body))
+
+    if node.finally_body:
+        lines.extend(_render_try_body_block("finally ブロック", node.finally_body))
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # ディスパッチ: IRNode の型に応じてレンダリング関数を呼び分ける
 # ---------------------------------------------------------------------------
 
@@ -540,6 +585,9 @@ def _render_ir_node(node: IRNode, index: int) -> str:
 
     if isinstance(node, LoopNode):
         return _render_loop_node(node, index)
+
+    if isinstance(node, TryCatchNode):
+        return _render_try_catch_node(node, index)
 
     if isinstance(node, DataTransformation):
         return _render_data_transformation(node, index)

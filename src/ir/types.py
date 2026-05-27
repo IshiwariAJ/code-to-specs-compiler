@@ -239,8 +239,27 @@ class ReturnNode:
     comment: str = ""                                      # 直前のコメント行（生テキスト）
 
 
+@dataclass(frozen=True)
+class TryCatchNode:
+    """try / catch / finally block with recursively extracted IR bodies."""
+    kind: Literal["TryCatchNode"]
+    try_body: tuple[IRNode, ...]
+    catch_var: str = ""
+    catch_body: tuple[IRNode, ...] = ()
+    finally_body: tuple[IRNode, ...] = ()
+    comment: str = ""
+
+
 # すべての関数本体 IR ノード型のユニオン型エイリアス
-IRNode = Union[GuardClause, ConditionBlock, LoopNode, DataTransformation, SideEffect, ReturnNode]
+IRNode = Union[
+    GuardClause,
+    ConditionBlock,
+    LoopNode,
+    DataTransformation,
+    SideEffect,
+    ReturnNode,
+    TryCatchNode,
+]
 
 
 # ---------------------------------------------------------------------------

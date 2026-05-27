@@ -1,6 +1,6 @@
 # 自然言語コンパイラ — プロジェクト進捗管理
 
-最終更新: 2026-05-27（Java 対応 完了: Phase 5B）
+最終更新: 2026-05-27（try/catch/finally IR 対応: Phase R7）
 
 ---
 
@@ -21,6 +21,7 @@ Phase R4 ██████████ 完了     クラスメソッド抽出�
 Phase 5B ██████████ 完了     Java 対応（src/languages/java.py 1ファイル追加）
 Phase R5 ██████████ 完了     レンダラー強化（Java クラスメソッドの処理フロー詳細を出力）
 Phase R6 ██████████ 完了     条件分岐ボディのネスト IR 解析（CaseNode.body）
+Phase R7 ██████████ 完了     例外処理のネスト IR 解析（TryCatchNode）
 ```
 
 ---
@@ -560,6 +561,35 @@ class ClassSpec:
 ### テスト結果
 
 **411件 全グリーン**（実行時間 0.42s）
+
+---
+
+## Phase R7 — 完了 ✅（例外処理のネスト IR 解析）
+
+**完了日**: 2026-05-27  
+**目的**: `try / catch / finally` と `try / except / finally` の各ブロック内の処理を、
+生テキストではなく Universal IR として再帰的に抽出する。
+
+### 実装内容
+
+| 変更ファイル | 内容 |
+|---|---|
+| `src/ir/types.py` | `TryCatchNode` を追加し、`IRNode` ユニオンを拡張 |
+| `src/ir/mapper.py` | `try_statement` から `try_body` / `catch_body` / `finally_body` を抽出 |
+| `src/renderer/markdown.py` | 例外処理セクションを追加し、各ブロックのIRを描画 |
+| `tests/test_mapper.py` | TS / Python / Java / PowerShell の try/catch/finally IR化テストを追加 |
+| `tests/test_renderer.py` | TryCatchNode の Markdown 出力テストを追加 |
+
+### テスト結果
+
+**422件 全グリーン**（実行時間 0.42s）
+
+| テストファイル | 件数 |
+|---|---|
+| `tests/test_mapper.py` | 193件 |
+| `tests/test_renderer.py` | 105件 |
+| `tests/test_pipeline.py` | 85件 |
+| `tests/test_batch.py` | 39件 |
 
 ---
 

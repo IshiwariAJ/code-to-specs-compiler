@@ -20,6 +20,7 @@ from src.ir.types import (
     ModuleVariableSpec,
     ReturnNode,
     SideEffect,
+    TryCatchNode,
     TypeDefinitionSpec,
 )
 from src.renderer.markdown import render_module_spec
@@ -241,6 +242,48 @@ class TestRenderLoopNode:
         output = _render_single_node(node)
         assert "total" in output
         assert "item.price" in output
+
+
+# ---------------------------------------------------------------------------
+# TryCatchNode のレンダリング
+# ---------------------------------------------------------------------------
+
+
+class TestRenderTryCatchNode:
+    def test_section_header_contains_exception_label(self):
+        node = TryCatchNode(kind="TryCatchNode", try_body=())
+        output = _render_single_node(node)
+        assert "例外処理" in output
+
+    def test_try_body_is_rendered(self):
+        node = TryCatchNode(
+            kind="TryCatchNode",
+            try_body=(SideEffect(kind="SideEffect", description="work()"),),
+        )
+        output = _render_single_node(node)
+        assert "try ブロック" in output
+        assert "work()" in output
+
+    def test_catch_var_is_rendered(self):
+        node = TryCatchNode(
+            kind="TryCatchNode",
+            try_body=(),
+            catch_var="error",
+            catch_body=(SideEffect(kind="SideEffect", description="log(error)"),),
+        )
+        output = _render_single_node(node)
+        assert "catch ブロック (`error`)" in output
+        assert "log(error)" in output
+
+    def test_finally_body_is_rendered(self):
+        node = TryCatchNode(
+            kind="TryCatchNode",
+            try_body=(),
+            finally_body=(SideEffect(kind="SideEffect", description="cleanup()"),),
+        )
+        output = _render_single_node(node)
+        assert "finally ブロック" in output
+        assert "cleanup()" in output
 
 
 # ---------------------------------------------------------------------------
