@@ -1,6 +1,6 @@
 # 自然言語コンパイラ — プロジェクト進捗管理
 
-最終更新: 2026-05-25（クラスメソッド抽出対応 完了: クラス内のメソッド一覧がMarkdown仕様書に出力）
+最終更新: 2026-05-27（Java 対応 完了: Phase 5B）
 
 ---
 
@@ -18,7 +18,8 @@ Phase R1 ██████████ 完了     リファクタリング: Lan
 Phase R2 ██████████ 完了     リファクタリング: 言語プラグインシステム（新言語 = 1ファイル追加）
 Phase R3 ██████████ 完了     Python クラス定義対応（@dataclass / class → クラス定義セクション）
 Phase R4 ██████████ 完了     クラスメソッド抽出対応（クラス内メソッド一覧を仕様書に表示）
-Phase 5B ░░░░░░░░░░ 未着手   Java 対応
+Phase 5B ██████████ 完了     Java 対応（src/languages/java.py 1ファイル追加）
+Phase R5 ██████████ 完了     レンダラー強化（Java クラスメソッドの処理フロー詳細を出力）
 ```
 
 ---
@@ -479,11 +480,62 @@ class ClassSpec:
 
 ---
 
+## Phase 5B + R5 — 完了 ✅（Java 対応 + レンダラー強化）
+
+**完了日**: 2026-05-27  
+**目的**: Java (.java) ファイルを解析できるようにし、クラスメソッドの処理フローを Markdown に出力する。
+
+### 実装内容
+
+| 新規/変更ファイル | 内容 |
+|---|---|
+| `src/parser/java_parser.py` ✨新規 | `parse_java_source()` — tree-sitter-java を遅延インポート |
+| `src/languages/java.py` ✨新規 | `JAVA_PROFILE` + 全抽出関数 + `PLUGIN` 定数 |
+| `src/renderer/markdown.py` 変更 | クラスメソッドに処理フロー（body）がある場合の詳細レンダリングを追加 |
+| `requirements.txt` 変更 | `tree-sitter-java>=0.21.0` 追加 |
+| `examples/sample.java` ✨新規 | Java サンプルコード（他言語版と同一ロジック） |
+| テスト追加 | `TestJavaClassDefinition` / `TestJavaImports` / `TestJavaGuardClause` / `TestJavaForEachLoop` / `TestJavaDataTransformation` / `TestJavaConditionBlock` (mapper: 38件) + `TestJavaE2E` (pipeline: 22件) |
+
+### Java 固有の AST 特性
+
+| 特性 | 詳細 |
+|---|---|
+| トップレベル関数なし | すべてのメソッドは `class_declaration` 内の `method_declaration` |
+| for-each | `enhanced_for_statement` — フィールドが `left`/`right` でなく `name`/`value` |
+| 条件式の括弧 | `condition_has_outer_parens=True` — `parenthesized_expression` を unwrap |
+| 代入 | `assignment_expression` が `=` と `+=` 等の両方を兼ねる（operator フィールドで区別）|
+| JavaDoc | `prev_named_sibling` が `block_comment` → `/** ... */` から説明文を抽出 |
+| ワイルドカード import | `import java.util.*;` → named child に `asterisk` ノードが来る（`.*` でなく）|
+| else if | Go と同じ `nested` スタイル（`alternative = if_statement`）|
+
+### レンダラー強化（R5）
+
+`render_module_spec()` にクラスメソッド詳細セクションを追加:
+- `method.body` が空でないメソッドのみ対象
+- `dataclasses.replace(method, name=f"{class_name}.{method.name}")` で修飾名を生成
+- 既存の `_render_function_spec()` を再利用（コード重複ゼロ）
+- 出力例: `## 🔧 関数: UserBenefitService.getUserBenefit`
+
+既存の `test_class_methods_rendered_as_list` は `body=()` のため影響なし。
+
+### テスト結果
+
+**403件 全グリーン**（実行時間 0.26s）
+
+| テストファイル | 件数 |
+|---|---|
+| `tests/test_mapper.py` | 183件（+38） |
+| `tests/test_renderer.py` | 100件（変化なし）|
+| `tests/test_pipeline.py` | 83件（+22） |
+| `tests/test_batch.py` | 37件（変化なし）|
+
+---
+
 ## 未来のフェーズ（参考）
 
 | フェーズ | 内容 |
 |---|---|
-| Phase 5B | Java 対応（`src/languages/java.py` を1ファイル追加するだけ） |
+| Phase 5C | C# 対応（Java と構造が近い）|
 | Phase 6 | Git フック連携（コミット時に自動再生成） |
 
 ---
@@ -491,7 +543,7 @@ class ClassSpec:
 ## 既知の制限事項
 
 1. **アロー関数は未対応**: `const fn = () => {}` 形式の関数は検出しない（TypeScript のみ）
-2. **クラスメソッドの本体は展開しない**: メソッド名一覧は表示するが、メソッド内の処理フロー（ガード句・ループ等）は出力しない（トップレベル関数と同等の展開は将来対応予定）
+2. **Python クラスメソッドの本体は展開しない**: Python のクラスメソッドは名前一覧のみ表示（Java / クラスベース言語ではメソッド処理フローを詳細出力）
 3. **ネストした関数は未対応**: 内部関数宣言は無視される
 4. **型情報なし**: 変数の型（`User`, `number` 等）は仕様書に含まれない
 5. **変数名依存**: 意味不明な変数名（`x`, `tmp`）の場合、出力も意味不明になる

@@ -23,6 +23,7 @@ from src.ir.types import (
     TypeDefinitionSpec,
 )
 from src.languages.go import PLUGIN as GO_PLUGIN
+from src.languages.java import PLUGIN as JAVA_PLUGIN
 from src.languages.python import PLUGIN as PYTHON_PLUGIN
 from src.languages.typescript import PLUGIN as TYPESCRIPT_PLUGIN
 
@@ -1347,3 +1348,454 @@ class TestPyClassDefinition:
         assert len(cls.fields) == 2
         assert len(cls.methods) == 2
         assert [m.name for m in cls.methods] == ["validate", "reset"]
+
+
+# ---------------------------------------------------------------------------
+# Java 言語サポートのテスト
+# ---------------------------------------------------------------------------
+
+
+def _java_module(source: str) -> ModuleSpec:
+    """Java スニペットを解析して ModuleSpec を返す純粋ヘルパー。"""
+    root = JAVA_PLUGIN.parse_source(source)
+    return map_source_to_module_spec(root, "test", JAVA_PLUGIN)
+
+
+def _java_class_body(source: str) -> tuple:
+    """Java スニペットの最初のクラスの最初のメソッドの IR ノード列を返す。"""
+    spec = _java_module(source)
+    return spec.class_definitions[0].methods[0].body
+
+
+class TestJavaClassDefinition:
+    """Java の class_declaration が ClassSpec に正しく変換されることを検証する。"""
+
+    def test_java_class_detected(self):
+        src = "public class MyService {}\n"
+        spec = _java_module(src)
+        assert len(spec.class_definitions) == 1
+
+    def test_java_class_name_extracted(self):
+        src = "public class UserService {}\n"
+        spec = _java_module(src)
+        assert spec.class_definitions[0].name == "UserService"
+
+    def test_java_class_is_not_dataclass(self):
+        src = "public class Foo {}\n"
+        spec = _java_module(src)
+        assert spec.class_definitions[0].is_dataclass is False
+
+    def test_java_class_javadoc_as_description(self):
+        src = (
+            "/** ユーザーサービスクラス */\n"
+            "public class UserService {}\n"
+        )
+        spec = _java_module(src)
+        assert "ユーザーサービスクラス" in spec.class_definitions[0].description
+
+    def test_java_class_without_javadoc_has_empty_description(self):
+        src = "public class Foo {}\n"
+        spec = _java_module(src)
+        assert spec.class_definitions[0].description == ""
+
+    def test_java_has_no_top_level_functions(self):
+        """Java はトップレベル関数がない — functions は空になる。"""
+        src = (
+            "public class Foo {\n"
+            "    public static void bar() {}\n"
+            "}\n"
+        )
+        spec = _java_module(src)
+        assert spec.functions == ()
+
+    def test_java_method_extracted_into_class(self):
+        src = (
+            "public class Foo {\n"
+            "    public static void bar() {}\n"
+            "}\n"
+        )
+        spec = _java_module(src)
+        cls = spec.class_definitions[0]
+        assert len(cls.methods) == 1
+        assert cls.methods[0].name == "bar"
+
+    def test_java_multiple_methods_all_extracted(self):
+        src = (
+            "public class Svc {\n"
+            "    public void a() {}\n"
+            "    public void b() {}\n"
+            "    public void c() {}\n"
+            "}\n"
+        )
+        spec = _java_module(src)
+        cls = spec.class_definitions[0]
+        assert len(cls.methods) == 3
+        names = [m.name for m in cls.methods]
+        assert names == ["a", "b", "c"]
+
+    def test_java_method_javadoc_as_description(self):
+        src = (
+            "public class Svc {\n"
+            "    /** 合計を計算する */\n"
+            "    public int sum(int a, int b) { return a + b; }\n"
+            "}\n"
+        )
+        spec = _java_module(src)
+        method = spec.class_definitions[0].methods[0]
+        assert "合計を計算する" in method.description
+
+    def test_java_method_return_type_extracted(self):
+        src = (
+            "public class Svc {\n"
+            "    public String getName() { return name; }\n"
+            "}\n"
+        )
+        spec = _java_module(src)
+        method = spec.class_definitions[0].methods[0]
+        assert method.return_type == "String"
+
+    def test_java_void_return_type_extracted(self):
+        src = (
+            "public class Svc {\n"
+            "    public void doWork() {}\n"
+            "}\n"
+        )
+        spec = _java_module(src)
+        method = spec.class_definitions[0].methods[0]
+        assert method.return_type == "void"
+
+    def test_java_method_params_extracted(self):
+        src = (
+            "public class Svc {\n"
+            "    public void process(String name, int count) {}\n"
+            "}\n"
+        )
+        spec = _java_module(src)
+        method = spec.class_definitions[0].methods[0]
+        assert len(method.params) == 2
+        assert method.params[0].name == "name"
+        assert method.params[0].type_text == "String"
+        assert method.params[1].name == "count"
+        assert method.params[1].type_text == "int"
+
+    def test_java_generic_type_param_extracted(self):
+        src = (
+            "import java.util.List;\n"
+            "public class Svc {\n"
+            "    public int sum(List<Integer> nums) { return 0; }\n"
+            "}\n"
+        )
+        spec = _java_module(src)
+        method = spec.class_definitions[0].methods[0]
+        assert "List" in method.params[0].type_text
+
+
+class TestJavaImports:
+    """Java の import_declaration が ImportSpec に正しく変換されることを検証する。"""
+
+    def test_java_single_import_detected(self):
+        src = (
+            "import java.util.List;\n"
+            "public class Foo {}\n"
+        )
+        spec = _java_module(src)
+        assert len(spec.imports) == 1
+
+    def test_java_import_module_name(self):
+        src = (
+            "import java.util.List;\n"
+            "public class Foo {}\n"
+        )
+        spec = _java_module(src)
+        assert spec.imports[0].source_module == "java.util"
+
+    def test_java_import_class_name(self):
+        src = (
+            "import java.util.List;\n"
+            "public class Foo {}\n"
+        )
+        spec = _java_module(src)
+        assert "List" in spec.imports[0].imported_names
+
+    def test_java_wildcard_import_no_class_name(self):
+        src = (
+            "import java.util.*;\n"
+            "public class Foo {}\n"
+        )
+        spec = _java_module(src)
+        assert spec.imports[0].source_module == "java.util"
+        assert spec.imports[0].imported_names == ()
+
+    def test_java_multiple_imports_detected(self):
+        src = (
+            "import java.util.List;\n"
+            "import java.io.IOException;\n"
+            "public class Foo {}\n"
+        )
+        spec = _java_module(src)
+        assert len(spec.imports) == 2
+
+    def test_java_multiple_imports_modules(self):
+        src = (
+            "import java.util.List;\n"
+            "import java.io.IOException;\n"
+            "public class Foo {}\n"
+        )
+        spec = _java_module(src)
+        modules = {s.source_module for s in spec.imports}
+        assert "java.util" in modules
+        assert "java.io" in modules
+
+
+class TestJavaGuardClause:
+    """Java のガード句（throw で早期中断）が GuardClause に変換されることを検証する。"""
+
+    def test_java_throw_guard_clause_detected(self):
+        src = (
+            "public class Svc {\n"
+            "    public void check(String s) {\n"
+            "        if (s == null) {\n"
+            '            throw new IllegalArgumentException("null");\n'
+            "        }\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert isinstance(body[0], GuardClause)
+
+    def test_java_guard_clause_condition_text(self):
+        src = (
+            "public class Svc {\n"
+            "    public void check(String s) {\n"
+            "        if (s == null) {\n"
+            '            throw new IllegalArgumentException("null");\n'
+            "        }\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert "s == null" in body[0].condition_text
+
+    def test_java_guard_clause_throw_action(self):
+        src = (
+            "public class Svc {\n"
+            "    public void check(String s) {\n"
+            "        if (s == null) {\n"
+            '            throw new RuntimeException("err");\n'
+            "        }\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert "スローして処理を中断する" in body[0].action_text
+
+    def test_java_return_guard_clause_detected(self):
+        src = (
+            "public class Svc {\n"
+            "    public int safe(int x) {\n"
+            "        if (x < 0) { return 0; }\n"
+            "        return x;\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert isinstance(body[0], GuardClause)
+        assert "処理を終了する" in body[0].action_text
+
+    def test_java_if_else_not_guard_clause(self):
+        src = (
+            "public class Svc {\n"
+            "    public int abs(int x) {\n"
+            "        if (x >= 0) { return x; } else { return -x; }\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert isinstance(body[0], ConditionBlock)
+
+
+class TestJavaForEachLoop:
+    """Java の enhanced_for_statement が LoopNode (FOR_EACH) に変換されることを検証する。"""
+
+    def test_java_foreach_detected_as_loop_node(self):
+        src = (
+            "import java.util.List;\n"
+            "public class Svc {\n"
+            "    public void process(List<String> items) {\n"
+            "        for (String item : items) {}\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert isinstance(body[0], LoopNode)
+        assert body[0].loop_type == "FOR_EACH"
+
+    def test_java_foreach_collection(self):
+        src = (
+            "import java.util.List;\n"
+            "public class Svc {\n"
+            "    public void process(List<String> items) {\n"
+            "        for (String item : items) {}\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert body[0].collection == "items"
+
+    def test_java_foreach_iterator(self):
+        src = (
+            "import java.util.List;\n"
+            "public class Svc {\n"
+            "    public void process(List<String> items) {\n"
+            "        for (String item : items) {}\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert body[0].iterator == "item"
+
+    def test_java_foreach_body_extracted(self):
+        src = (
+            "import java.util.List;\n"
+            "public class Svc {\n"
+            "    public void sum(List<Integer> nums) {\n"
+            "        int total = 0;\n"
+            "        for (int n : nums) {\n"
+            "            total += n;\n"
+            "        }\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        loop = body[1]
+        assert isinstance(loop, LoopNode)
+        assert len(loop.body) == 1
+        assert isinstance(loop.body[0], DataTransformation)
+        assert loop.body[0].operation == "ADD"
+
+
+class TestJavaDataTransformation:
+    """Java の変数宣言・代入が DataTransformation に変換されることを検証する。"""
+
+    def test_java_local_var_decl_is_data_transformation(self):
+        src = (
+            "public class Svc {\n"
+            "    public void f() {\n"
+            "        int total = 0;\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert isinstance(body[0], DataTransformation)
+        assert body[0].operation == "ASSIGN"
+
+    def test_java_local_var_decl_target(self):
+        src = (
+            "public class Svc {\n"
+            "    public void f() {\n"
+            "        int total = 0;\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert body[0].target == "total"
+
+    def test_java_local_var_decl_value(self):
+        src = (
+            "public class Svc {\n"
+            "    public void f() {\n"
+            "        int total = 0;\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert body[0].value == "0"
+
+    def test_java_augmented_assignment_add(self):
+        src = (
+            "public class Svc {\n"
+            "    public void f() {\n"
+            "        int x = 0;\n"
+            "        x += 5;\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert isinstance(body[1], DataTransformation)
+        assert body[1].operation == "ADD"
+
+    def test_java_simple_assignment(self):
+        src = (
+            "public class Svc {\n"
+            "    public void f() {\n"
+            "        int x = 0;\n"
+            "        x = 10;\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert isinstance(body[1], DataTransformation)
+        assert body[1].operation == "ASSIGN"
+
+
+class TestJavaConditionBlock:
+    """Java の if/else-if/else が ConditionBlock に変換されることを検証する。"""
+
+    def test_java_if_else_is_condition_block(self):
+        src = (
+            "public class Svc {\n"
+            "    public int abs(int x) {\n"
+            "        if (x >= 0) { return x; } else { return -x; }\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert isinstance(body[0], ConditionBlock)
+
+    def test_java_if_else_has_two_cases(self):
+        src = (
+            "public class Svc {\n"
+            "    public int abs(int x) {\n"
+            "        if (x >= 0) { return x; } else { return -x; }\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert len(body[0].cases) == 2
+
+    def test_java_else_if_chain_has_three_cases(self):
+        src = (
+            "public class Svc {\n"
+            "    public String grade(int s) {\n"
+            '        if (s >= 90) { return "S"; }\n'
+            '        else if (s >= 70) { return "B"; }\n'
+            '        else { return "C"; }\n'
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert isinstance(body[0], ConditionBlock)
+        assert len(body[0].cases) == 3
+
+    def test_java_condition_text_strips_outer_parens(self):
+        """Java の条件式は parenthesized_expression — 外側の括弧は除去される。"""
+        src = (
+            "public class Svc {\n"
+            "    public int sign(int x) {\n"
+            "        if (x > 0) { return 1; } else { return -1; }\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert body[0].cases[0].condition_text == "x > 0"
+
+    def test_java_else_case_default_condition(self):
+        src = (
+            "public class Svc {\n"
+            "    public int f(int x) {\n"
+            "        if (x > 0) { return 1; } else { return -1; }\n"
+            "    }\n"
+            "}\n"
+        )
+        body = _java_class_body(src)
+        assert "デフォルト" in body[0].cases[1].condition_text

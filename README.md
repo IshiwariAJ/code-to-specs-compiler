@@ -5,7 +5,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-343%20passing-brightgreen.svg)](#テスト--testing)
+[![Tests](https://img.shields.io/badge/tests-403%20passing-brightgreen.svg)](#テスト--testing)
 
 ---
 
@@ -22,8 +22,8 @@ LLMは使用しません。[tree-sitter](https://tree-sitter.github.io/tree-sitt
 |---|---|
 | 🎯 **ハルシネーションなし** | AIを使わないため、コードに書いていないことが仕様書に現れない |
 | 🔒 **完全ローカル実行** | 機密コード・社内コードも外部送信なしで安全に処理 |
-| 🌐 **多言語・統一フォーマット** | TypeScript / Python / Go / PowerShell から同一Markdownフォーマットで出力 |
-| ⚡ **高速・決定論的** | 同じ入力からは常に同じ出力（343テスト全グリーン） |
+| 🌐 **多言語・統一フォーマット** | TypeScript / Python / Go / PowerShell / Java から同一Markdownフォーマットで出力 |
+| ⚡ **高速・決定論的** | 同じ入力からは常に同じ出力（403テスト全グリーン） |
 
 ---
 
@@ -35,7 +35,7 @@ LLMは使用しません。[tree-sitter](https://tree-sitter.github.io/tree-sitt
 | Python | `.py` | ✅ 対応済み |
 | Go | `.go` | ✅ 対応済み |
 | PowerShell | `.ps1`, `.psm1` | ✅ 対応済み |
-| Java など | — | 🔜 将来対応予定 |
+| Java | `.java` | ✅ 対応済み |
 
 新言語の追加は `src/languages/<言語名>.py` を1ファイル作成するだけです（既存ファイルへの変更不要）。
 
@@ -209,11 +209,11 @@ pytest
 
 | テストファイル | 件数 | 内容 |
 |---|---|---|
-| `tests/test_mapper.py` | 145件 | AST → IR マッピングのユニットテスト |
+| `tests/test_mapper.py` | 183件 | AST → IR マッピングのユニットテスト |
 | `tests/test_renderer.py` | 100件 | IR → Markdown レンダリングのユニットテスト |
-| `tests/test_pipeline.py` | 61件 | E2E 統合テスト（TypeScript / Python / Go / PowerShell） |
+| `tests/test_pipeline.py` | 83件 | E2E 統合テスト（TypeScript / Python / Go / PowerShell / Java） |
 | `tests/test_batch.py` | 37件 | バッチコンパイル機能のテスト |
-| **合計** | **343件** | **全グリーン** |
+| **合計** | **403件** | **全グリーン** |
 
 ---
 
@@ -238,8 +238,8 @@ It uses no LLMs — only compiler technology ([tree-sitter](https://tree-sitter.
 |---|---|
 | 🎯 **Zero hallucination** | No AI means the spec only contains what the code actually says |
 | 🔒 **Fully local** | Confidential code never leaves your machine |
-| 🌐 **Multi-language, unified format** | TypeScript, Python, Go, and PowerShell all produce the same Markdown structure |
-| ⚡ **Fast & deterministic** | Same input always produces the same output (343 tests passing) |
+| 🌐 **Multi-language, unified format** | TypeScript, Python, Go, PowerShell, and Java all produce the same Markdown structure |
+| ⚡ **Fast & deterministic** | Same input always produces the same output (403 tests passing) |
 
 ---
 
@@ -251,7 +251,7 @@ It uses no LLMs — only compiler technology ([tree-sitter](https://tree-sitter.
 | Python | `.py` | ✅ Supported |
 | Go | `.go` | ✅ Supported |
 | PowerShell | `.ps1`, `.psm1` | ✅ Supported |
-| Java, etc. | — | 🔜 Planned |
+| Java | `.java` | ✅ Supported |
 
 Adding a new language requires only one new file (`src/languages/<lang>.py`) — no changes to existing files.
 
@@ -346,15 +346,15 @@ pip install pytest
 pytest
 ```
 
-343 tests, all green.
+403 tests, all green.
 
 | File | Count | Scope |
 |---|---|---|
-| `tests/test_mapper.py` | 145 | AST → IR mapping unit tests |
+| `tests/test_mapper.py` | 183 | AST → IR mapping unit tests |
 | `tests/test_renderer.py` | 100 | IR → Markdown rendering unit tests |
-| `tests/test_pipeline.py` | 61 | E2E integration tests (TypeScript / Python / Go / PowerShell) |
+| `tests/test_pipeline.py` | 83 | E2E integration tests (TypeScript / Python / Go / PowerShell / Java) |
 | `tests/test_batch.py` | 37 | Batch compile feature tests |
-| **Total** | **343** | **All green** |
+| **Total** | **403** | **All green** |
 
 ---
 

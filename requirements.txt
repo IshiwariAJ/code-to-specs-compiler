@@ -13,3 +13,4 @@ tree-sitter-typescript>=0.21.0
 tree-sitter-python>=0.21.0
 tree-sitter-go>=0.21.0
 tree-sitter-powershell>=0.26.0
+tree-sitter-java>=0.21.0

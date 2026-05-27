@@ -507,3 +507,164 @@ class TestPyClassE2E:
         class_pos = result.index("🏛️ クラス定義")
         func_pos = result.index("🔧 関数")
         assert class_pos < func_pos
+
+
+# ---------------------------------------------------------------------------
+# Java 言語 E2E テスト
+# ---------------------------------------------------------------------------
+
+# 最小限の Java ソース（ガード句・ループ・条件分岐・データ変換を含む）
+_JAVA_SOURCE = (
+    "import java.util.List;\n"
+    "\n"
+    "/**\n"
+    " * ユーザーの購入履歴からポイント特典を計算するサービスクラス\n"
+    " */\n"
+    "public class UserBenefitService {\n"
+    "\n"
+    "    /**\n"
+    "     * ユーザーの購入履歴からポイント特典を計算して返す\n"
+    "     */\n"
+    "    public static BenefitResult getUserBenefit(\n"
+    "            String status, String rank, List<Purchase> purchaseHistory) {\n"
+    '        if (!status.equals("ACTIVE")) {\n'
+    '            throw new IllegalArgumentException("エラー: 無効なユーザーです");\n'
+    "        }\n"
+    "        int totalAmount = 0;\n"
+    "        for (Purchase history : purchaseHistory) {\n"
+    "            totalAmount += history.getPrice();\n"
+    "        }\n"
+    "        if (totalAmount >= 100000) {\n"
+    '            return new BenefitResult(1000, "プレミアム特典付与");\n'
+    "        } else {\n"
+    '            return new BenefitResult(100, "通常特典付与");\n'
+    "        }\n"
+    "    }\n"
+    "\n"
+    "    /**\n"
+    "     * スコアを評価してグレード文字列を返す\n"
+    "     */\n"
+    "    public static String evaluateScore(int score) {\n"
+    "        if (score < 0 || score > 100) {\n"
+    '            throw new IllegalArgumentException("スコアは0〜100の範囲で指定してください");\n'
+    "        }\n"
+    "        if (score >= 90) {\n"
+    '            return "S";\n'
+    "        } else {\n"
+    '            return "C以下";\n'
+    "        }\n"
+    "    }\n"
+    "}\n"
+)
+
+
+class TestJavaE2E:
+    """Java ソースコードの E2E 変換テスト"""
+
+    def test_java_compiles_without_error(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_java_extension_is_supported(self):
+        assert ".java" in get_supported_extensions()
+
+    def test_output_contains_module_header(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "# モジュール仕様: sample" in result
+
+    def test_output_contains_import_section(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "📦 依存関係（インポート）" in result
+
+    def test_output_contains_import_module(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "java.util" in result
+
+    def test_output_contains_import_class(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "List" in result
+
+    def test_output_contains_class_section(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "🏛️ クラス定義" in result
+
+    def test_output_contains_class_name(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "UserBenefitService" in result
+
+    def test_output_contains_class_description_from_javadoc(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "ユーザーの購入履歴からポイント特典を計算するサービスクラス" in result
+
+    def test_output_contains_method_names_in_list(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "getUserBenefit" in result
+        assert "evaluateScore" in result
+
+    def test_output_contains_method_description_from_javadoc(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "ユーザーの購入履歴からポイント特典を計算して返す" in result
+        assert "スコアを評価してグレード文字列を返す" in result
+
+    def test_output_contains_guard_clause(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "前提条件（ガード句）" in result
+
+    def test_output_contains_throw_action(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "スローして処理を中断する" in result
+
+    def test_output_contains_foreach_loop(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "繰り返し処理" in result
+        assert "purchaseHistory" in result
+
+    def test_output_contains_loop_iterator(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "history" in result
+
+    def test_output_contains_data_transformation(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "データ変換" in result
+        assert "totalAmount" in result
+
+    def test_output_contains_condition_block(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "条件分岐" in result
+
+    def test_output_contains_method_detail_section(self):
+        """メソッドの処理フロー詳細がクラスメソッドとして出力されることを確認する"""
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        # クラス名.メソッド名 形式で詳細セクションが出力される
+        assert "UserBenefitService.getUserBenefit" in result
+
+    def test_output_contains_method_params(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "status" in result
+        assert "String" in result
+
+    def test_output_contains_return_type(self):
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "BenefitResult" in result
+
+    def test_no_top_level_functions_message(self):
+        """Java はトップレベル関数がないため、その旨が出力されることを確認する"""
+        result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        assert "トップレベル関数が検出されませんでした" in result
+
+    def test_java_same_structural_markers_as_typescript(self):
+        """Java と TypeScript が同一の構造マーカーを出力することを確認（Universal IR の実証）"""
+        java_result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
+        ts_source = (
+            "function getUserBenefit(status, rank, purchaseHistory) {\n"
+            '  if (status !== "ACTIVE") { throw new Error("invalid"); }\n'
+            "  let totalAmount = 0;\n"
+            "  for (const history of purchaseHistory) { totalAmount += history.price; }\n"
+            "  if (totalAmount >= 100000) { return 1000; } else { return 100; }\n"
+            "}\n"
+        )
+        ts_result = compile_to_spec(ts_source, "test", ".ts")
+        for marker in ["前提条件（ガード句）", "繰り返し処理", "条件分岐", "データ変換"]:
+            assert marker in java_result, f"Java 出力に {marker} がない"
+            assert marker in ts_result, f"TS 出力に {marker} がない"

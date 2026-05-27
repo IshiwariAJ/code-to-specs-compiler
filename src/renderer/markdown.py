@@ -11,6 +11,8 @@
 """
 from __future__ import annotations
 
+from dataclasses import replace as _dataclass_replace
+
 from src.ir.types import (
     CaseNode,
     ClassFieldSpec,
@@ -624,6 +626,22 @@ def render_module_spec(spec: ModuleSpec) -> str:
         sections.append("")
         sections.append("---")
         sections.append("")
+
+    # クラスメソッド詳細セクション
+    # メソッドに処理フロー（body）がある場合のみレンダリング（Java 等のクラスベース言語向け）
+    for class_spec in spec.class_definitions:
+        detailed_methods = [m for m in class_spec.methods if m.body]
+        if detailed_methods:
+            for method in detailed_methods:
+                # クラス名を接頭辞として付けた FunctionSpec でレンダリング
+                qualified = _dataclass_replace(
+                    method,
+                    name=f"{class_spec.name}.{method.name}",
+                )
+                sections.append(_render_function_spec(qualified))
+                sections.append("")
+                sections.append("---")
+                sections.append("")
 
     # 関数セクション
     if not spec.functions:
