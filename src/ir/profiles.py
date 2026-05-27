@@ -125,11 +125,6 @@ class LanguageProfile:
 
     # ---------- mapper.py の分岐を言語名ではなく設定値で行うためのフラグ ----------
 
-    # 関数説明の取得スタイル
-    # "comment":   関数直前のコメント（TypeScript / Go）
-    # "docstring": 関数本体先頭の文字列リテラル（Python）
-    function_description_style: str
-
     # ファイル先頭にモジュール docstring（expression_statement 内の string）が存在しうるか
     # Python: True / TypeScript, Go: False
     has_module_docstring: bool
@@ -168,17 +163,6 @@ class LanguageProfile:
     # "body_field":          child_by_field_name("body")（TypeScript / Python / Go デフォルト）
     # "script_block_body":   script_block → script_block_body（PowerShell 用）
     function_body_access: str = "body_field"
-
-    # foreach 文の変数・コレクション・本体へのアクセス方法
-    # "left_right_body_fields": child_by_field_name(left/right/body)（TypeScript / Python デフォルト）
-    # "var_pipeline_block_children": named_children[0,1,2]（PowerShell 用）
-    foreach_access: str = "left_right_body_fields"
-
-    # 関数説明コメントのアクセス方法（function_description_style の拡張）
-    # "comment":       直前の sibling コメント（TypeScript / Go デフォルト）
-    # "docstring":     関数本体先頭の文字列リテラル（Python）
-    # "inner_comment": 関数ノードの named_child コメント（PowerShell: <# .SYNOPSIS ... #>）
-    # ※ function_description_style フィールドと重複するが、そちらは既存コードとの互換性のため温存
 
     # トップレベルのラッパーノードタイプ（""=ルート直下に関数が存在）
     # "" (デフォルト): root_node.named_children から直接検索

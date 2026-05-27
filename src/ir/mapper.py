@@ -109,75 +109,18 @@ def _get_preceding_comment(node: Node) -> str:
     return ""
 
 
-def _get_py_function_docstring(fn_node: Node) -> str:
-    """
-    Python 関数本体の先頭にある docstring を返す。
-
-    docstring は関数 block の最初の expression_statement 内の string リテラル。
-    """
-    body_node = fn_node.child_by_field_name("body")
-    if body_node is None:
-        return ""
-    first_stmt = next(iter(body_node.named_children), None)
-    if first_stmt is None or first_stmt.type != "expression_statement":
-        return ""
-    string_node = next(
-        (c for c in first_stmt.named_children if c.type == "string"),
-        None,
-    )
-    if string_node is None:
-        return ""
-    return extract_node_text(string_node)
-
-
-def _extract_ps_synopsis(comment_text: str) -> str:
-    """
-    PowerShell コメントベースヘルプ（<# .SYNOPSIS ... #>）から .SYNOPSIS の内容を抽出する。
-
-    .SYNOPSIS セクションが存在しない場合はコメント全体（クリーンアップ後）を返す。
-    """
-    lines = comment_text.strip().lstrip("<#").rstrip("#>").strip().splitlines()
-    in_synopsis = False
-    synopsis_lines: list[str] = []
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped.upper().startswith(".SYNOPSIS"):
-            in_synopsis = True
-            rest = stripped[len(".SYNOPSIS"):].strip()
-            if rest:
-                synopsis_lines.append(rest)
-            continue
-        if in_synopsis:
-            if stripped.startswith("."):
-                break  # 次のセクションが始まった
-            synopsis_lines.append(stripped)
-
-    if synopsis_lines:
-        return " ".join(s for s in synopsis_lines if s)
-    # .SYNOPSIS がなければ先頭行（または空文字）
-    for line in lines:
-        stripped = line.strip()
-        if stripped and not stripped.startswith("."):
-            return stripped
-    return ""
-
-
-def _get_function_description(fn_node: Node, profile: LanguageProfile) -> str:
+def _get_function_description(fn_node: Node, plugin: "LanguagePlugin") -> str:
     """
     関数の説明文を返す。
 
-    "docstring"     スタイル（Python）: 関数本体先頭の文字列リテラル
-    "comment"       スタイル（TypeScript / Go）: 関数直前のコメント
-    "inner_comment" スタイル（PowerShell）: 関数ノードの named_child コメント（<# .SYNOPSIS #>）
+    plugin.function_description_extractor が設定されている場合はそれを使う。
+    なければ関数直前のコメントを返す（TypeScript / Go のデフォルト）。
+
+    言語固有の抽出ロジック（Python docstring / PowerShell .SYNOPSIS）は
+    各言語のプラグインファイル（python.py / powershell.py）に定義されている。
     """
-    if profile.function_description_style == "docstring":
-        return _get_py_function_docstring(fn_node)
-    if profile.function_description_style == "inner_comment":
-        comment_node = next((c for c in fn_node.named_children if c.type == "comment"), None)
-        if comment_node is None:
-            return ""
-        return _extract_ps_synopsis(extract_node_text(comment_node))
+    if plugin.function_description_extractor is not None:
+        return plugin.function_description_extractor(fn_node)
     return _get_preceding_comment(fn_node)
 
 
@@ -529,30 +472,21 @@ def _is_for_of(for_node: Node) -> bool:
 
 
 def _map_for_each_to_loop(
-    for_node: Node, profile: LanguageProfile, direct_stmt_map: _DirectStmtMap
+    for_node: Node, profile: LanguageProfile, direct_stmt_map: _DirectStmtMap, plugin: "LanguagePlugin"
 ) -> LoopNode:
     """
-    for...of（TypeScript）、for...in（Python）、または foreach（PowerShell）を
-    LoopNode IR（FOR_EACH）に変換する。
+    for...of（TypeScript）または for...in（Python）を LoopNode IR（FOR_EACH）に変換する。
 
-    TypeScript / Python: tree-sitter フィールド名 left / right / body を使用。
-    PowerShell:          named_children[0](variable) / [1](pipeline) / [2](statement_block) を使用。
+    tree-sitter フィールド名 left / right / body を使用する（TypeScript / Python 共通）。
+    PowerShell の foreach は powershell.py の for_loop_mapper フックで処理される。
     """
-    if profile.foreach_access == "var_pipeline_block_children":
-        # PowerShell: foreach ($item in $collection) { ... }
-        fe_named = for_node.named_children
-        left_node = fe_named[0] if len(fe_named) > 0 else None   # variable ($item)
-        right_node = fe_named[1] if len(fe_named) > 1 else None  # pipeline ($items)
-        body_node = fe_named[2] if len(fe_named) > 2 else None   # statement_block
-    else:
-        # TypeScript / Python: フィールド名アクセス
-        left_node = for_node.child_by_field_name("left")
-        right_node = for_node.child_by_field_name("right")
-        body_node = for_node.child_by_field_name("body")
+    left_node = for_node.child_by_field_name("left")
+    right_node = for_node.child_by_field_name("right")
+    body_node = for_node.child_by_field_name("body")
 
     iterator = extract_node_text(left_node).strip() if left_node is not None else "item"
     collection = extract_node_text(right_node).strip() if right_node is not None else ""
-    nested_body = _extract_body_ir_nodes(body_node, profile, direct_stmt_map) if body_node is not None else []
+    nested_body = _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin) if body_node is not None else []
 
     return LoopNode(
         kind="Loop",
@@ -592,117 +526,17 @@ def _extract_for_range_iterator(for_node: Node) -> str:
 
 
 def _map_for_range_to_loop(
-    for_node: Node, profile: LanguageProfile, direct_stmt_map: _DirectStmtMap
+    for_node: Node, profile: LanguageProfile, direct_stmt_map: _DirectStmtMap, plugin: "LanguagePlugin"
 ) -> LoopNode:
     """古典的 for 文（TypeScript のみ）を LoopNode IR（FOR_RANGE）に変換する。"""
     body_node = for_node.child_by_field_name("body")
-    nested_body = _extract_body_ir_nodes(body_node, profile, direct_stmt_map) if body_node is not None else []
+    nested_body = _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin) if body_node is not None else []
 
     return LoopNode(
         kind="Loop",
         loop_type="FOR_RANGE",
         collection=_extract_for_range_summary(for_node),
         iterator=_extract_for_range_iterator(for_node),
-        body=tuple(nested_body),
-    )
-
-
-# ---------------------------------------------------------------------------
-# マッピング: for ループ → LoopNode IR（Go 専用）
-# ---------------------------------------------------------------------------
-
-
-def _has_range_clause(for_node: Node) -> bool:
-    """Go: for_statement が range_clause を持つか（for...range ループ）。"""
-    return _has_child_of_type(for_node, "range_clause")
-
-
-def _has_for_clause(for_node: Node) -> bool:
-    """Go: for_statement が for_clause を持つか（C スタイルループ）。"""
-    return _has_child_of_type(for_node, "for_clause")
-
-
-def _extract_go_range_iterator(range_clause: Node) -> str:
-    """Go の range_clause から iterator 変数テキストを返す。"""
-    left_node = range_clause.named_children[0] if range_clause.named_children else None
-    if left_node is None:
-        return "item"
-    return extract_node_text(left_node).strip()
-
-
-def _extract_go_range_collection(range_clause: Node) -> str:
-    """Go の range_clause からコレクション式テキストを返す。"""
-    children = range_clause.named_children
-    if len(children) < 2:
-        return ""
-    return extract_node_text(children[-1]).strip()
-
-
-def _map_go_for_each_to_loop(
-    for_node: Node, profile: LanguageProfile, direct_stmt_map: _DirectStmtMap
-) -> LoopNode:
-    """Go の for...range 文を LoopNode IR（FOR_EACH）に変換する。"""
-    range_clause = next(
-        (c for c in for_node.named_children if c.type == "range_clause"),
-        None,
-    )
-    iterator = _extract_go_range_iterator(range_clause) if range_clause is not None else "item"
-    collection = _extract_go_range_collection(range_clause) if range_clause is not None else ""
-
-    body_node = for_node.child_by_field_name("body")
-    nested_body = _extract_body_ir_nodes(body_node, profile, direct_stmt_map) if body_node is not None else []
-
-    return LoopNode(
-        kind="Loop",
-        loop_type="FOR_EACH",
-        collection=collection,
-        iterator=iterator,
-        body=tuple(nested_body),
-    )
-
-
-def _extract_go_for_clause_summary(for_clause: Node) -> str:
-    """Go の for_clause サマリーを 'init; condition; update' 形式で返す。"""
-    parts = [extract_node_text(c).strip() for c in for_clause.named_children]
-    return "; ".join(parts)
-
-
-def _extract_go_for_clause_iterator(for_clause: Node) -> str:
-    """Go の for_clause の初期化文からカウンタ変数名を返す。"""
-    if not for_clause.named_children:
-        return "i"
-    init_node = for_clause.named_children[0]
-    if init_node.type == "short_var_declaration":
-        left_node = init_node.named_children[0] if init_node.named_children else None
-        if left_node is not None:
-            first_id = next(
-                (c for c in left_node.named_children if c.type == "identifier"),
-                None,
-            )
-            if first_id is not None:
-                return extract_node_text(first_id)
-    return "i"
-
-
-def _map_go_for_range_to_loop(
-    for_node: Node, profile: LanguageProfile, direct_stmt_map: _DirectStmtMap
-) -> LoopNode:
-    """Go の C スタイル for 文を LoopNode IR（FOR_RANGE）に変換する。"""
-    for_clause = next(
-        (c for c in for_node.named_children if c.type == "for_clause"),
-        None,
-    )
-    body_node = for_node.child_by_field_name("body")
-    nested_body = _extract_body_ir_nodes(body_node, profile, direct_stmt_map) if body_node is not None else []
-
-    collection = _extract_go_for_clause_summary(for_clause) if for_clause is not None else ""
-    iterator = _extract_go_for_clause_iterator(for_clause) if for_clause is not None else "i"
-
-    return LoopNode(
-        kind="Loop",
-        loop_type="FOR_RANGE",
-        collection=collection,
-        iterator=iterator,
         body=tuple(nested_body),
     )
 
@@ -843,14 +677,15 @@ def _map_statement_to_ir(
     statement_node: Node,
     profile: LanguageProfile,
     direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
 ) -> Optional[IRNode]:
     """
-    1つの文ASTノードを profile を参照して適切な IR ノードに変換する。
+    1つの文ASTノードを profile / plugin を参照して適切な IR ノードに変換する。
 
     対応する文タイプ（profile によって異なる）:
     - if_statement                               → GuardClause または ConditionBlock
-    - for_each_node_type (TS: of / Py: in / Go: range_clause) → LoopNode (FOR_EACH)
-    - for_range_node_type (TS のみ / Go は for_each と共用)    → LoopNode (FOR_RANGE)
+    - for_each_node_type                         → LoopNode（plugin.for_loop_mapper または汎用）
+    - for_range_node_type (TS のみ)              → LoopNode (FOR_RANGE)
     - expression_statement                       → DataTransformation または SideEffect
     - lexical_declaration_types (TS のみ)        → DataTransformation
     - direct_stmt_map（Go 等の直接代入文）        → DataTransformation
@@ -867,25 +702,21 @@ def _map_statement_to_ir(
             ir_node = _map_if_to_condition_block(statement_node, profile)
 
     elif node_type == profile.for_each_node_type:
-        if profile.for_loop_flavor == "of_keyword":
+        if plugin.for_loop_mapper is not None:
+            # 言語固有フック（Go / PowerShell 等）: range_clause 判定など複雑なロジックはプラグイン側で実装
+            body_extractor = lambda body_node: _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin)
+            ir_node = plugin.for_loop_mapper(statement_node, body_extractor)
+        elif profile.for_loop_flavor == "of_keyword":
             # TypeScript: for_in_statement が for...of かどうかで振り分け
             if not _is_for_of(statement_node):
                 return None  # for...in はスコープ外（Phase 1 定義）
-            ir_node = _map_for_each_to_loop(statement_node, profile, direct_stmt_map)
-        elif profile.for_loop_flavor == "range_clause":
-            # Go: for_statement が range / C スタイル / 無限ループを兼ねる
-            if _has_range_clause(statement_node):
-                ir_node = _map_go_for_each_to_loop(statement_node, profile, direct_stmt_map)
-            elif _has_for_clause(statement_node):
-                ir_node = _map_go_for_range_to_loop(statement_node, profile, direct_stmt_map)
-            else:
-                return None  # 無限ループ・while スタイルは対象外
+            ir_node = _map_for_each_to_loop(statement_node, profile, direct_stmt_map, plugin)
         else:
             # "always_foreach": Python など、常に FOR_EACH
-            ir_node = _map_for_each_to_loop(statement_node, profile, direct_stmt_map)
+            ir_node = _map_for_each_to_loop(statement_node, profile, direct_stmt_map, plugin)
 
     elif profile.for_range_node_type and node_type == profile.for_range_node_type:
-        ir_node = _map_for_range_to_loop(statement_node, profile, direct_stmt_map)
+        ir_node = _map_for_range_to_loop(statement_node, profile, direct_stmt_map, plugin)
 
     elif node_type == "expression_statement":
         ir_node = _map_expression_statement_to_ir(statement_node, profile)
@@ -941,7 +772,7 @@ def _map_statement_to_ir(
 
 
 def _extract_body_ir_nodes(
-    body_node: Node, profile: LanguageProfile, direct_stmt_map: _DirectStmtMap
+    body_node: Node, profile: LanguageProfile, direct_stmt_map: _DirectStmtMap, plugin: "LanguagePlugin"
 ) -> list[IRNode]:
     """
     ブロックノード（statement_block / block）から、
@@ -949,7 +780,7 @@ def _extract_body_ir_nodes(
     """
     results: list[IRNode] = []
     for statement in _get_block_statements(body_node, profile):
-        ir_node = _map_statement_to_ir(statement, profile, direct_stmt_map)
+        ir_node = _map_statement_to_ir(statement, profile, direct_stmt_map, plugin)
         if ir_node is not None:
             results.append(ir_node)
     return results
@@ -1016,12 +847,12 @@ def _map_function_to_spec(
         ) if script_block is not None else None
     else:
         body_node = fn_node.child_by_field_name("body")
-    ir_nodes = _extract_body_ir_nodes(body_node, profile, direct_stmt_map) if body_node is not None else []
+    ir_nodes = _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin) if body_node is not None else []
 
     return FunctionSpec(
         name=name,
         body=tuple(ir_nodes),
-        description=_get_function_description(fn_node, profile),
+        description=_get_function_description(fn_node, plugin),
         params=plugin.param_extractor(fn_node),
         return_type=plugin.return_type_extractor(fn_node),
     )

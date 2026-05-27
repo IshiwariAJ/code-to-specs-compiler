@@ -37,12 +37,37 @@ PYTHON_PROFILE = LanguageProfile(
     type_alias_node_type="",   # Python は型エイリアス未対応（3.12+ の type 文は将来対応）
     interface_node_type="",    # Python はインターフェース未対応
     block_inner_node_type="",
-    function_description_style="docstring",
     has_module_docstring=True,
     for_loop_flavor="always_foreach",
     direct_statement_types=frozenset(),
     class_node_types=frozenset({"decorated_definition", "class_definition"}),
 )
+
+
+# ---------------------------------------------------------------------------
+# 関数説明文抽出（docstring）
+# ---------------------------------------------------------------------------
+
+def extract_py_function_docstring(fn_node: Node) -> str:
+    """
+    Python 関数本体の先頭にある docstring を返す（LanguagePlugin.function_description_extractor フック）。
+
+    docstring は関数 block の最初の expression_statement 内の string リテラル。
+    docstring がない場合は空文字を返す（mapper が関数直前コメントにフォールバック）。
+    """
+    body_node = fn_node.child_by_field_name("body")
+    if body_node is None:
+        return ""
+    first_stmt = next(iter(body_node.named_children), None)
+    if first_stmt is None or first_stmt.type != "expression_statement":
+        return ""
+    string_node = next(
+        (c for c in first_stmt.named_children if c.type == "string"),
+        None,
+    )
+    if string_node is None:
+        return ""
+    return extract_node_text(string_node)
 
 
 # ---------------------------------------------------------------------------
@@ -405,4 +430,5 @@ PLUGIN = LanguagePlugin(
     class_extractor=extract_py_class,
     param_extractor=extract_py_params,
     return_type_extractor=extract_py_return_type,
+    function_description_extractor=extract_py_function_docstring,  # docstring を関数説明として使用
 )

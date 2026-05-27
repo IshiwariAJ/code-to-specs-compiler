@@ -6,13 +6,13 @@ Go 言語プラグイン
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from tree_sitter import Node
 
 from ..ir.node_utils import extract_node_text, normalize_whitespace
 from ..ir.profiles import LanguageProfile
-from ..ir.types import DataTransformation, ImportSpec, ModuleVariableSpec, ParamSpec
+from ..ir.types import DataTransformation, ImportSpec, IRNode, LoopNode, ModuleVariableSpec, ParamSpec
 from ..parser.go_parser import parse_go_source
 from . import LanguagePlugin
 
@@ -24,7 +24,7 @@ GO_PROFILE = LanguageProfile(
     name="go",
     function_node_type="function_declaration",
     # Go の for は range / C スタイル / 無限ループがすべて for_statement
-    # 内部で range_clause / for_clause の有無を判定して振り分ける
+    # 内部で range_clause / for_clause の有無を判定して振り分ける（go_for_loop_mapper フック）
     for_each_node_type="for_statement",
     for_range_node_type="",  # for_each_node_type と同じノード。空文字で第2パスを無効化
     guard_action_types=frozenset({"return_statement"}),  # Go に throw はない（panic は call）
@@ -39,9 +39,8 @@ GO_PROFILE = LanguageProfile(
     type_alias_node_type="",    # Go の type 宣言は将来対応
     interface_node_type="",
     block_inner_node_type="statement_list",  # Go: block → statement_list → 文ノード
-    function_description_style="comment",
     has_module_docstring=False,
-    for_loop_flavor="range_clause",
+    for_loop_flavor="range_clause",  # mapper では参照されない（go_for_loop_mapper フックを使用）
     direct_statement_types=frozenset({
         "assignment_statement",   # x = y  /  x += y 等
         "short_var_declaration",  # x := y
@@ -257,6 +256,106 @@ def map_go_var_decl_to_ir(stmt_node: Node) -> Optional[DataTransformation]:
 
 
 # ---------------------------------------------------------------------------
+# for ループ変換（mapper.py から移植: range_clause / for_clause 判定）
+# ---------------------------------------------------------------------------
+
+def _has_range_clause(for_node: Node) -> bool:
+    """Go: for_statement が range_clause を持つか（for...range ループ）。"""
+    return any(c.type == "range_clause" for c in for_node.children)
+
+
+def _has_for_clause(for_node: Node) -> bool:
+    """Go: for_statement が for_clause を持つか（C スタイルループ）。"""
+    return any(c.type == "for_clause" for c in for_node.children)
+
+
+def _extract_go_range_iterator(range_clause: Node) -> str:
+    """Go の range_clause から iterator 変数テキストを返す。"""
+    left_node = range_clause.named_children[0] if range_clause.named_children else None
+    if left_node is None:
+        return "item"
+    return extract_node_text(left_node).strip()
+
+
+def _extract_go_range_collection(range_clause: Node) -> str:
+    """Go の range_clause からコレクション式テキストを返す。"""
+    children = range_clause.named_children
+    if len(children) < 2:
+        return ""
+    return extract_node_text(children[-1]).strip()
+
+
+def _extract_go_for_clause_summary(for_clause: Node) -> str:
+    """Go の for_clause サマリーを 'init; condition; update' 形式で返す。"""
+    parts = [extract_node_text(c).strip() for c in for_clause.named_children]
+    return "; ".join(parts)
+
+
+def _extract_go_for_clause_iterator(for_clause: Node) -> str:
+    """Go の for_clause の初期化文からカウンタ変数名を返す。"""
+    if not for_clause.named_children:
+        return "i"
+    init_node = for_clause.named_children[0]
+    if init_node.type == "short_var_declaration":
+        left_node = init_node.named_children[0] if init_node.named_children else None
+        if left_node is not None:
+            first_id = next(
+                (c for c in left_node.named_children if c.type == "identifier"),
+                None,
+            )
+            if first_id is not None:
+                return extract_node_text(first_id)
+    return "i"
+
+
+def go_for_loop_mapper(
+    for_node: Node,
+    extract_body: Callable[[Node], list[IRNode]],
+) -> Optional[LoopNode]:
+    """
+    Go の for_statement を LoopNode IR に変換する（LanguagePlugin.for_loop_mapper フック）。
+
+    range_clause → FOR_EACH（for...range）
+    for_clause   → FOR_RANGE（C スタイル for）
+    それ以外（無限ループ等）→ None（スコープ外）
+    """
+    body_node = for_node.child_by_field_name("body")
+    nested_body = extract_body(body_node) if body_node is not None else []
+
+    if _has_range_clause(for_node):
+        range_clause = next(
+            (c for c in for_node.named_children if c.type == "range_clause"),
+            None,
+        )
+        iterator = _extract_go_range_iterator(range_clause) if range_clause is not None else "item"
+        collection = _extract_go_range_collection(range_clause) if range_clause is not None else ""
+        return LoopNode(
+            kind="Loop",
+            loop_type="FOR_EACH",
+            collection=collection,
+            iterator=iterator,
+            body=tuple(nested_body),
+        )
+
+    if _has_for_clause(for_node):
+        for_clause = next(
+            (c for c in for_node.named_children if c.type == "for_clause"),
+            None,
+        )
+        collection = _extract_go_for_clause_summary(for_clause) if for_clause is not None else ""
+        iterator = _extract_go_for_clause_iterator(for_clause) if for_clause is not None else "i"
+        return LoopNode(
+            kind="Loop",
+            loop_type="FOR_RANGE",
+            collection=collection,
+            iterator=iterator,
+            body=tuple(nested_body),
+        )
+
+    return None  # 無限ループ・while スタイルは対象外
+
+
+# ---------------------------------------------------------------------------
 # 引数・戻り値の型抽出
 # ---------------------------------------------------------------------------
 
@@ -336,4 +435,5 @@ PLUGIN = LanguagePlugin(
     ),
     param_extractor=extract_go_params,
     return_type_extractor=extract_go_return_type,
+    for_loop_mapper=go_for_loop_mapper,  # range_clause / for_clause 判定をここで実施
 )

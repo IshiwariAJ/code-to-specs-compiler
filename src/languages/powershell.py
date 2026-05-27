@@ -16,7 +16,7 @@ PowerShell 言語プラグイン (.ps1 / .psm1)
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Callable, Optional
 
 from tree_sitter import Node
 
@@ -26,6 +26,7 @@ from ..ir.types import (
     DataTransformation,
     ImportSpec,
     IRNode,
+    LoopNode,
     ModuleVariableSpec,
     ParamSpec,
     SideEffect,
@@ -54,16 +55,14 @@ POWERSHELL_PROFILE = LanguageProfile(
     type_alias_node_type="",
     interface_node_type="",
     block_inner_node_type="statement_list",  # statement_block → statement_list → 文ノード
-    function_description_style="inner_comment",  # <# .SYNOPSIS ... #> コメント
     has_module_docstring=False,
-    for_loop_flavor="always_foreach",    # foreach は常に FOR_EACH
+    for_loop_flavor="always_foreach",    # mapper では参照されない（ps_for_loop_mapper フックを使用）
     direct_statement_types=frozenset({"pipeline"}),  # 代入・コマンド呼び出しはすべて pipeline
     class_node_types=frozenset(),        # PowerShell class は将来対応
     # 言語固有アクセス方法
     if_then_block_access="statement_block_child",
     function_name_access="function_name_child",
     function_body_access="script_block_body",
-    foreach_access="var_pipeline_block_children",
     top_level_wrapper_type="statement_list",  # program → statement_list → function_statement
 )
 
@@ -75,6 +74,92 @@ _PS_AUGMENTED_OPS: dict[str, str] = {
     "/=": "DIVIDE",
     "%=": "MODULO",
 }
+
+
+# ---------------------------------------------------------------------------
+# 関数説明文抽出（<# .SYNOPSIS ... #> コメント）
+# ---------------------------------------------------------------------------
+
+def _extract_ps_synopsis(comment_text: str) -> str:
+    """
+    PowerShell コメントベースヘルプ（<# .SYNOPSIS ... #>）から .SYNOPSIS の内容を抽出する。
+
+    .SYNOPSIS セクションが存在しない場合はコメント全体（クリーンアップ後）を返す。
+    """
+    lines = comment_text.strip().lstrip("<#").rstrip("#>").strip().splitlines()
+    in_synopsis = False
+    synopsis_lines: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.upper().startswith(".SYNOPSIS"):
+            in_synopsis = True
+            rest = stripped[len(".SYNOPSIS"):].strip()
+            if rest:
+                synopsis_lines.append(rest)
+            continue
+        if in_synopsis:
+            if stripped.startswith("."):
+                break  # 次のセクションが始まった
+            synopsis_lines.append(stripped)
+
+    if synopsis_lines:
+        return " ".join(s for s in synopsis_lines if s)
+    # .SYNOPSIS がなければ先頭の非空行（または空文字）
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith("."):
+            return stripped
+    return ""
+
+
+def extract_ps_function_description(fn_node: Node) -> str:
+    """
+    PowerShell 関数の <# .SYNOPSIS ... #> コメントから説明文を返す
+    （LanguagePlugin.function_description_extractor フック）。
+
+    <# ... #> コメントは function_statement の named_child として現れる。
+    コメントが存在しない場合は空文字を返す。
+    """
+    comment_node = next((c for c in fn_node.named_children if c.type == "comment"), None)
+    if comment_node is None:
+        return ""
+    return _extract_ps_synopsis(extract_node_text(comment_node))
+
+
+# ---------------------------------------------------------------------------
+# foreach ループ変換（named_children アクセス）
+# ---------------------------------------------------------------------------
+
+def ps_for_loop_mapper(
+    for_node: Node,
+    extract_body: Callable[[Node], list[IRNode]],
+) -> Optional[LoopNode]:
+    """
+    PowerShell の foreach_statement を LoopNode IR（FOR_EACH）に変換する
+    （LanguagePlugin.for_loop_mapper フック）。
+
+    foreach ($item in $collection) { ... } の AST 構造:
+      named_children[0]: variable  （$item）
+      named_children[1]: pipeline  （$collection）
+      named_children[2]: statement_block（ボディ）
+    """
+    fe_named = for_node.named_children
+    left_node = fe_named[0] if len(fe_named) > 0 else None   # variable ($item)
+    right_node = fe_named[1] if len(fe_named) > 1 else None  # pipeline ($collection)
+    body_node = fe_named[2] if len(fe_named) > 2 else None   # statement_block
+
+    iterator = extract_node_text(left_node).strip() if left_node is not None else "item"
+    collection = extract_node_text(right_node).strip() if right_node is not None else ""
+    nested_body = extract_body(body_node) if body_node is not None else []
+
+    return LoopNode(
+        kind="Loop",
+        loop_type="FOR_EACH",
+        collection=collection,
+        iterator=iterator,
+        body=tuple(nested_body),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -261,4 +346,6 @@ PLUGIN = LanguagePlugin(
     ),
     param_extractor=extract_ps_params,
     return_type_extractor=extract_ps_return_type,
+    for_loop_mapper=ps_for_loop_mapper,                              # foreach 構文差異を吸収
+    function_description_extractor=extract_ps_function_description,  # <# .SYNOPSIS #> を使用
 )

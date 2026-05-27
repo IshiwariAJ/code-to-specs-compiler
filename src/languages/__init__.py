@@ -19,7 +19,7 @@ from typing import Callable, Optional
 from tree_sitter import Node
 
 from ..ir.profiles import LanguageProfile
-from ..ir.types import ClassSpec, DataTransformation, ImportSpec, IRNode, ModuleVariableSpec, ParamSpec, TypeDefinitionSpec
+from ..ir.types import ClassSpec, DataTransformation, ImportSpec, IRNode, LoopNode, ModuleVariableSpec, ParamSpec, TypeDefinitionSpec
 
 
 @dataclass(frozen=True)
@@ -73,6 +73,21 @@ class LanguagePlugin:
     # 関数定義ノード → 戻り値の型テキスト（型アノテーションがなければ空文字）
     # 未対応の場合は lambda _: "" を渡す
     return_type_extractor: Callable[[Node], str]
+
+    # ---------- 言語固有ロジックの拡張フック（デフォルト値あり）----------
+
+    # for ループ変換フック（None のとき mapper の汎用ロジックを使用）
+    # シグネチャ: (for_node, extract_body_fn) -> Optional[LoopNode]
+    #   extract_body_fn: 本体ノード → IRNode リスト を返すコールバック
+    # 使用例: Go（range_clause / for_clause の振り分け）、PowerShell（foreach 構文差異の吸収）
+    # TypeScript / Python は None（汎用ロジックで処理可能）
+    for_loop_mapper: Optional[Callable[[Node, Callable[[Node], list[IRNode]]], Optional[LoopNode]]] = None
+
+    # 関数説明文抽出フック（None のとき関数直前コメントを返す汎用ロジックを使用）
+    # シグネチャ: (fn_node) -> str
+    # 使用例: Python（docstring）、PowerShell（<# .SYNOPSIS #>）
+    # TypeScript / Go は None（関数直前コメントをそのまま使用）
+    function_description_extractor: Optional[Callable[[Node], str]] = None
 
 
 def discover_plugins() -> dict[str, LanguagePlugin]:

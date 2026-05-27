@@ -37,7 +37,6 @@ TYPESCRIPT_PROFILE = LanguageProfile(
     type_alias_node_type="type_alias_declaration",
     interface_node_type="interface_declaration",
     block_inner_node_type="",
-    function_description_style="comment",
     has_module_docstring=False,
     for_loop_flavor="of_keyword",
     direct_statement_types=frozenset(),
