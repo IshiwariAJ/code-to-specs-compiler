@@ -423,6 +423,13 @@ class TestSwitchNode:
         assert isinstance(sw.cases[0].body[0], DataTransformation)
         assert isinstance(sw.cases[0].body[1], ReturnNode)
 
+    def test_ts_switch_case_unmapped_statement_generates_warning(self):
+        src = "function f(s) { switch (s) { case 'A': doWork(); break; default: return 0; } }"
+        spec = _ts_module(src)
+        warnings_text = "\n".join(spec.extraction_warnings)
+        assert "break_statement" in warnings_text
+        assert "`break;`" in warnings_text
+
     def test_ts_switch_multiple_cases(self):
         from src.ir.types import SwitchNode
         src = "function f(s) { switch (s) { case 'A': return 1; case 'B': return 2; default: return 0; } }"

@@ -1,6 +1,6 @@
 # 自然言語コンパイラ — プロジェクト進捗管理
 
-最終更新: 2026-05-28（async / await マーカー対応）
+最終更新: 2026-05-28（レビュー指摘対応: ドキュメント更新 / switch case 警告回帰テスト）
 
 ---
 
@@ -24,7 +24,23 @@ Phase R6 ██████████ 完了     条件分岐ボディのネ�
 Phase R7 ██████████ 完了     例外処理のネスト IR 解析（TryCatchNode）
 Phase R8 ██████████ 完了     Python 誤警告バグ修正（docstring / pass / ellipsis）
 Phase R9 ██████████ 完了     async / await マーカー（is_async / is_awaited フィールド、全言語対応）
+Phase R10 ██████████ 完了    レビュー指摘対応（テスト件数更新 / switch case 内未対応文の回帰テスト）
 ```
+
+---
+
+## 現在の検証状況
+
+**503件 全グリーン**（2026-05-28 時点）
+
+| テストファイル | 件数 |
+|---|---|
+| `tests/test_mapper.py` | 254件 |
+| `tests/test_renderer.py` | 125件 |
+| `tests/test_pipeline.py` | 85件 |
+| `tests/test_batch.py` | 39件 |
+
+直近の補強として、TypeScript `switch` の `case` 本体に含まれる未対応文（例: `break_statement`）が `extraction_warnings` に記録されることを回帰テストで固定した。
 
 ---
 
