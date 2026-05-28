@@ -1,6 +1,6 @@
 # 自然言語コンパイラ — プロジェクト進捗管理
 
-最終更新: 2026-05-27（try/catch/finally IR 対応: Phase R7）
+最終更新: 2026-05-28（async / await マーカー対応）
 
 ---
 
@@ -22,6 +22,8 @@ Phase 5B ██████████ 完了     Java 対応（src/languages/j
 Phase R5 ██████████ 完了     レンダラー強化（Java クラスメソッドの処理フロー詳細を出力）
 Phase R6 ██████████ 完了     条件分岐ボディのネスト IR 解析（CaseNode.body）
 Phase R7 ██████████ 完了     例外処理のネスト IR 解析（TryCatchNode）
+Phase R8 ██████████ 完了     Python 誤警告バグ修正（docstring / pass / ellipsis）
+Phase R9 ██████████ 完了     async / await マーカー（is_async / is_awaited フィールド、全言語対応）
 ```
 
 ---
@@ -587,6 +589,43 @@ class ClassSpec:
 | テストファイル | 件数 |
 |---|---|
 | `tests/test_mapper.py` | 193件 |
+| `tests/test_renderer.py` | 105件 |
+| `tests/test_pipeline.py` | 85件 |
+| `tests/test_batch.py` | 39件 |
+
+※ R8 完了後は **440件**（test_mapper.py が 211件に増加）。
+
+---
+
+## Phase R8 — 完了 ✅（Python 誤警告バグ修正）
+
+**完了日**: 2026-05-28  
+**目的**: Python ファイルのコンパイル時に `extraction_warnings` に不要な警告が出るバグを修正する。
+
+### 問題（R8 前）
+
+| 不具合 | 原因 |
+|---|---|
+| 関数の docstring が「未対応構文」として警告に出る | function body の先頭 `string-only expression_statement` を IR 変換しようとしていた |
+| `pass` が「未対応構文」として警告に出る | `pass_statement` を no-op として扱っていなかった |
+| `...`（ellipsis）が「未対応構文」として警告に出る | `expression_statement → ellipsis` を no-op として扱っていなかった |
+
+### 実装内容
+
+| 変更ファイル | 内容 |
+|---|---|
+| `src/ir/profiles.py` | `LanguageProfile` に `function_docstring_in_body: bool = False` フィールドを追加 |
+| `src/languages/python.py` | `PYTHON_PROFILE` に `function_docstring_in_body=True` を設定 |
+| `src/ir/mapper.py` | `_is_docstring_statement()` / `_is_no_op_statement()` を追加。body 先頭 docstring と `pass` / `...` を silent skip。トップレベル未対応宣言の警告化ロジック `_collect_top_level_extraction_warnings()` を追加 |
+| `tests/test_mapper.py` | 誤警告が出ないことを確認するテストを +18件追加 |
+
+### テスト結果
+
+**440件 全グリーン**（実行時間 0.53s）
+
+| テストファイル | 件数 |
+|---|---|
+| `tests/test_mapper.py` | 211件 |
 | `tests/test_renderer.py` | 105件 |
 | `tests/test_pipeline.py` | 85件 |
 | `tests/test_batch.py` | 39件 |

@@ -2320,3 +2320,104 @@ class TestTopLevelExtractionWarnings:
         # tree-sitter-powershell の実装に依存するため、'class' という単語が警告に
         # 含まれていることを確認する（ノードタイプ・スニペット双方を含む）。
         assert "Purchase" in warnings_text
+
+
+# ---------------------------------------------------------------------------
+# async / await マーカー
+# ---------------------------------------------------------------------------
+
+
+class TestAsyncFunction:
+    """FunctionSpec.is_async: async 宣言の検出テスト"""
+
+    def test_ts_async_function_is_marked(self):
+        src = "async function fetchUser(id: number): Promise<string> { return ''; }"
+        spec = _ts_module(src)
+        assert spec.functions[0].is_async is True
+
+    def test_ts_regular_function_is_not_async(self):
+        src = "function fetchUser(id: number): string { return ''; }"
+        spec = _ts_module(src)
+        assert spec.functions[0].is_async is False
+
+    def test_py_async_function_is_marked(self):
+        src = "async def fetch_data(url: str) -> str:\n    return url\n"
+        spec = _py_module(src)
+        assert spec.functions[0].is_async is True
+
+    def test_py_regular_function_is_not_async(self):
+        src = "def fetch_data(url: str) -> str:\n    return url\n"
+        spec = _py_module(src)
+        assert spec.functions[0].is_async is False
+
+
+class TestAwaitedExpressions:
+    """SideEffect.is_awaited / DataTransformation.is_awaited の検出テスト"""
+
+    # --- TypeScript: スタンドアロン await（SideEffect） ---
+
+    def test_ts_standalone_await_is_side_effect(self):
+        src = "async function f() { await doSomething(); }"
+        body = _ts_body(src)
+        assert isinstance(body[0], SideEffect)
+
+    def test_ts_standalone_await_is_awaited(self):
+        src = "async function f() { await doSomething(); }"
+        body = _ts_body(src)
+        assert body[0].is_awaited is True
+
+    def test_ts_standalone_await_description_includes_await(self):
+        src = "async function f() { await doSomething(); }"
+        body = _ts_body(src)
+        assert "await" in body[0].description
+
+    def test_ts_regular_call_is_not_awaited(self):
+        src = "function f() { console.log('hi'); }"
+        body = _ts_body(src)
+        assert body[0].is_awaited is False
+
+    # --- TypeScript: await を含む変数宣言（DataTransformation） ---
+
+    def test_ts_lexical_await_is_data_transformation(self):
+        src = "async function f() { const data = await fetchData(1); }"
+        body = _ts_body(src)
+        assert isinstance(body[0], DataTransformation)
+
+    def test_ts_lexical_await_is_awaited(self):
+        src = "async function f() { const data = await fetchData(1); }"
+        body = _ts_body(src)
+        assert body[0].is_awaited is True
+
+    def test_ts_lexical_await_value_text(self):
+        src = "async function f() { const data = await fetchData(1); }"
+        body = _ts_body(src)
+        assert "await" in body[0].value
+
+    def test_ts_lexical_no_await_is_not_awaited(self):
+        src = "function f() { const x = getValue(); }"
+        body = _ts_body(src)
+        assert body[0].is_awaited is False
+
+    # --- TypeScript: await を含む代入式（DataTransformation） ---
+
+    def test_ts_assignment_await_is_awaited(self):
+        src = "async function f() { result = await processData(); }"
+        body = _ts_body(src)
+        assert isinstance(body[0], DataTransformation)
+        assert body[0].is_awaited is True
+
+    # --- Python: スタンドアロン await（SideEffect） ---
+
+    def test_py_standalone_await_is_awaited(self):
+        src = "async def f():\n    await do_something()\n"
+        body = _py_body(src)
+        assert isinstance(body[0], SideEffect)
+        assert body[0].is_awaited is True
+
+    # --- Python: await を含む代入（DataTransformation） ---
+
+    def test_py_assignment_await_is_awaited(self):
+        src = "async def f():\n    data = await fetch_data(1)\n"
+        body = _py_body(src)
+        assert isinstance(body[0], DataTransformation)
+        assert body[0].is_awaited is True

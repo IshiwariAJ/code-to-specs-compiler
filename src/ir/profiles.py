@@ -185,3 +185,8 @@ class LanguageProfile:
     # do-while ループのノードタイプ（"" = 未対応）
     # TypeScript / Java / PowerShell: "do_statement"（Python には do-while なし）
     do_while_node_type: str = ""
+
+    # await 式のノードタイプ（"" = 未対応）
+    # TypeScript: "await_expression"、Python: "await"
+    # Go / Java / PowerShell: ""（async/await がない、またはモデルが異なる）
+    await_expression_type: str = ""

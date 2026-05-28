@@ -963,3 +963,101 @@ class TestRenderClassDefinitions:
         cls = ClassSpec(kind="ClassSpec", name="Data", is_dataclass=True)
         output = render_module_spec(_make_class_module(cls))
         assert "**メソッド:**" not in output
+
+
+# ---------------------------------------------------------------------------
+# async / await マーカーのレンダリング
+# ---------------------------------------------------------------------------
+
+
+class TestRenderAsyncFunction:
+    """FunctionSpec.is_async のレンダリングテスト"""
+
+    def test_async_function_uses_async_label(self):
+        spec = ModuleSpec(
+            name="M",
+            functions=(FunctionSpec(name="fetchUser", body=(), is_async=True),),
+        )
+        output = render_module_spec(spec)
+        assert "非同期関数" in output
+        assert "`fetchUser`" in output
+
+    def test_regular_function_uses_regular_label(self):
+        spec = ModuleSpec(
+            name="M",
+            functions=(FunctionSpec(name="fetchUser", body=(), is_async=False),),
+        )
+        output = render_module_spec(spec)
+        assert "非同期関数" not in output
+        assert "🔧 関数:" in output
+
+    def test_async_function_heading_format(self):
+        spec = ModuleSpec(
+            name="M",
+            functions=(FunctionSpec(name="fetchUser", body=(), is_async=True),),
+        )
+        output = render_module_spec(spec)
+        assert "## 🔧 非同期関数: `fetchUser`" in output
+
+
+class TestRenderAwaitedSideEffect:
+    """SideEffect.is_awaited のレンダリングテスト"""
+
+    def test_awaited_side_effect_uses_async_label(self):
+        node = SideEffect(kind="SideEffect", description="await doSomething()", is_awaited=True)
+        output = _render_single_node(node)
+        assert "⏳" in output
+
+    def test_awaited_side_effect_description_shown(self):
+        node = SideEffect(kind="SideEffect", description="await doSomething()", is_awaited=True)
+        output = _render_single_node(node)
+        assert "await doSomething()" in output
+
+    def test_regular_side_effect_uses_bell_icon(self):
+        node = SideEffect(kind="SideEffect", description="console.log(x)", is_awaited=False)
+        output = _render_single_node(node)
+        assert "🔔" in output
+        assert "⏳" not in output
+
+    def test_awaited_section_label_at_top_level(self):
+        node = SideEffect(kind="SideEffect", description="await fetch()", is_awaited=True)
+        output = _render_single_node(node)
+        assert "非同期副作用" in output
+
+
+class TestRenderAwaitedDataTransformation:
+    """DataTransformation.is_awaited のレンダリングテスト"""
+
+    def test_awaited_data_transformation_uses_async_icon(self):
+        node = DataTransformation(
+            kind="DataTransformation",
+            target="result",
+            operation="ASSIGN",
+            value="await fetchData()",
+            is_awaited=True,
+        )
+        output = _render_single_node(node)
+        assert "⏳" in output
+
+    def test_awaited_data_transformation_shows_target(self):
+        node = DataTransformation(
+            kind="DataTransformation",
+            target="result",
+            operation="ASSIGN",
+            value="await fetchData()",
+            is_awaited=True,
+        )
+        output = _render_single_node(node)
+        assert "result" in output
+
+    def test_regular_data_transformation_no_async_icon(self):
+        node = DataTransformation(
+            kind="DataTransformation",
+            target="total",
+            operation="ADD",
+            value="x",
+            is_awaited=False,
+        )
+        output = _render_single_node(node)
+        assert "⏳" not in output
+        assert "🔁" in output

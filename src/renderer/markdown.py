@@ -379,12 +379,17 @@ def _render_data_transformation(node: DataTransformation, index: int) -> str:
     """
     label = _OPERATION_LABELS.get(node.operation, "を更新する")
     comment_line = _render_comment_blockquote(node.comment)
-    bullet = f"* `{node.target}` {label}: `{node.value}`"
+    if node.is_awaited:
+        bullet = f"* ⏳ (await) `{node.target}` {label}: `{node.value}`"
+        section_label = "⏳ 非同期データ変換"
+    else:
+        bullet = f"* `{node.target}` {label}: `{node.value}`"
+        section_label = "🔁 データ変換"
 
     if index > 0:
         if comment_line:
-            return f"### {index}. 🔁 データ変換\n{comment_line}\n{bullet}"
-        return f"### {index}. 🔁 データ変換\n{bullet}"
+            return f"### {index}. {section_label}\n{comment_line}\n{bullet}"
+        return f"### {index}. {section_label}\n{bullet}"
     if comment_line:
         return f"{comment_line}\n{bullet}"
     return bullet
@@ -403,12 +408,17 @@ def _render_side_effect(node: SideEffect, index: int) -> str:
     - index == 0（ループ本体等の入れ子）: 箇条書きのみ
     """
     comment_line = _render_comment_blockquote(node.comment)
-    bullet = f"* 🔔 副作用: `{node.description}`"
+    if node.is_awaited:
+        bullet = f"* ⏳ 非同期副作用 (await): `{node.description}`"
+        section_label = "⏳ 非同期副作用"
+    else:
+        bullet = f"* 🔔 副作用: `{node.description}`"
+        section_label = "🔔 外部への副作用"
 
     if index > 0:
         if comment_line:
-            return f"### {index}. 🔔 外部への副作用\n{comment_line}\n{bullet}"
-        return f"### {index}. 🔔 外部への副作用\n{bullet}"
+            return f"### {index}. {section_label}\n{comment_line}\n{bullet}"
+        return f"### {index}. {section_label}\n{bullet}"
     if comment_line:
         return f"{comment_line}\n{bullet}"
     return bullet
@@ -651,8 +661,9 @@ def _render_ir_node(node: IRNode, index: int) -> str:
 
 def _render_function_spec(spec: FunctionSpec) -> str:
     """FunctionSpec IR を Markdown セクションに変換する。"""
+    fn_label = "非同期関数" if spec.is_async else "関数"
     lines = [
-        f"## 🔧 関数: `{spec.name}`",
+        f"## 🔧 {fn_label}: `{spec.name}`",
         "",
     ]
 

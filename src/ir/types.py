@@ -203,6 +203,7 @@ class DataTransformation:
     operation: str  # 操作種別（ADD / ASSIGN / etc.）
     value: str      # 右辺の式テキスト      （例: "history.price"）
     comment: str = ""  # 直前のコメント行（生テキスト）
+    is_awaited: bool = False  # 右辺が await 式かどうか（非同期関数の呼び出し）
 
 
 @dataclass(frozen=True)
@@ -216,6 +217,7 @@ class SideEffect:
     kind: Literal["SideEffect"]
     description: str  # 式全体のテキスト（例: "console.log(x)"）
     comment: str = ""  # 直前のコメント行（生テキスト）
+    is_awaited: bool = False  # await 式かどうか（非同期処理の呼び出し）
 
 
 @dataclass(frozen=True)
@@ -292,6 +294,7 @@ class FunctionSpec:
     description: str = ""               # JSDoc コメント（TypeScript）または docstring（Python）
     params: tuple[ParamSpec, ...] = ()  # 引数リスト（順序保持）
     return_type: str = ""               # 戻り値の型テキスト（型アノテーションがなければ空文字）
+    is_async: bool = False              # async 宣言されているか（async function / async def）
 
 
 @dataclass(frozen=True)

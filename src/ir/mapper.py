@@ -886,7 +886,21 @@ _AUGMENTED_ASSIGNMENT_OPERATIONS: dict[str, str] = {
 }
 
 
-def _map_augmented_assignment_to_ir(expr_node: Node) -> DataTransformation:
+def _is_async_function(fn_node: Node) -> bool:
+    """関数ノードが async 宣言されているか判定する。
+
+    TypeScript の `async function` / Python の `async def` はいずれも
+    非名前付き子ノードとして `async` キーワードを持つ。
+    """
+    return any(
+        not c.is_named and c.text == b"async"
+        for c in fn_node.children
+    )
+
+
+def _map_augmented_assignment_to_ir(
+    expr_node: Node, profile: LanguageProfile
+) -> DataTransformation:
     """
     複合代入式（+=, -= 等）を DataTransformation IR ノードに変換する。
     TypeScript: augmented_assignment_expression
@@ -901,16 +915,24 @@ def _map_augmented_assignment_to_ir(expr_node: Node) -> DataTransformation:
     value = extract_node_text(right_node).strip() if right_node is not None else ""
     op_text = extract_node_text(op_node).strip() if op_node is not None else "+="
     operation = _AUGMENTED_ASSIGNMENT_OPERATIONS.get(op_text, "ASSIGN")
+    is_awaited = (
+        bool(profile.await_expression_type)
+        and right_node is not None
+        and right_node.type == profile.await_expression_type
+    )
 
     return DataTransformation(
         kind="DataTransformation",
         target=target,
         operation=operation,
         value=value,
+        is_awaited=is_awaited,
     )
 
 
-def _map_assignment_to_ir(expr_node: Node) -> DataTransformation:
+def _map_assignment_to_ir(
+    expr_node: Node, profile: LanguageProfile
+) -> DataTransformation:
     """
     単純代入式（=）を DataTransformation IR ノードに変換する。
     TypeScript: assignment_expression
@@ -922,16 +944,22 @@ def _map_assignment_to_ir(expr_node: Node) -> DataTransformation:
 
     target = extract_node_text(left_node).strip() if left_node is not None else ""
     value = extract_node_text(right_node).strip() if right_node is not None else ""
+    is_awaited = (
+        bool(profile.await_expression_type)
+        and right_node is not None
+        and right_node.type == profile.await_expression_type
+    )
 
     return DataTransformation(
         kind="DataTransformation",
         target=target,
         operation="ASSIGN",
         value=value,
+        is_awaited=is_awaited,
     )
 
 
-def _map_call_to_ir(expr_node: Node) -> SideEffect:
+def _map_call_to_ir(expr_node: Node, is_awaited: bool = False) -> SideEffect:
     """
     関数呼び出し式を SideEffect IR ノードに変換する。
     TypeScript: call_expression
@@ -941,6 +969,7 @@ def _map_call_to_ir(expr_node: Node) -> SideEffect:
     return SideEffect(
         kind="SideEffect",
         description=extract_node_text(expr_node).strip(),
+        is_awaited=is_awaited,
     )
 
 
@@ -955,11 +984,19 @@ def _map_expression_statement_to_ir(
     if expr_node is None:
         return None
 
+    # await_expression / await のスタンドアロン使用（await fn() 単体の文）
+    if profile.await_expression_type and expr_node.type == profile.await_expression_type:
+        return SideEffect(
+            kind="SideEffect",
+            description=extract_node_text(expr_node).strip(),
+            is_awaited=True,
+        )
+
     if expr_node.type == profile.augmented_assignment_type:
-        return _map_augmented_assignment_to_ir(expr_node)
+        return _map_augmented_assignment_to_ir(expr_node, profile)
 
     if expr_node.type == profile.assignment_type:
-        return _map_assignment_to_ir(expr_node)
+        return _map_assignment_to_ir(expr_node, profile)
 
     if expr_node.type == profile.call_type:
         return _map_call_to_ir(expr_node)
@@ -967,7 +1004,9 @@ def _map_expression_statement_to_ir(
     return None
 
 
-def _map_lexical_declaration_to_ir(stmt_node: Node) -> Optional[IRNode]:
+def _map_lexical_declaration_to_ir(
+    stmt_node: Node, profile: LanguageProfile
+) -> Optional[IRNode]:
     """
     変数宣言文（TypeScript の let / const）を DataTransformation IR ノードに変換する。
     Python はこのノードタイプを持たず、expression_statement → assignment で処理される。
@@ -987,12 +1026,17 @@ def _map_lexical_declaration_to_ir(stmt_node: Node) -> Optional[IRNode]:
 
     target = extract_node_text(name_node).strip() if name_node is not None else ""
     value = extract_node_text(value_node).strip()
+    is_awaited = (
+        bool(profile.await_expression_type)
+        and value_node.type == profile.await_expression_type
+    )
 
     return DataTransformation(
         kind="DataTransformation",
         target=target,
         operation="ASSIGN",
         value=value,
+        is_awaited=is_awaited,
     )
 
 
@@ -1131,7 +1175,7 @@ def _map_statement_to_ir(
         ir_node = _map_expression_statement_to_ir(statement_node, profile)
 
     elif node_type in profile.lexical_declaration_types:
-        ir_node = _map_lexical_declaration_to_ir(statement_node)
+        ir_node = _map_lexical_declaration_to_ir(statement_node, profile)
 
     # --- expression_statement を介さない直接代入文（Go / PowerShell 等）---
     elif node_type in profile.direct_statement_types:
@@ -1348,6 +1392,7 @@ def _map_function_to_spec(
         description=_get_function_description(fn_node, plugin),
         params=plugin.param_extractor(fn_node),
         return_type=plugin.return_type_extractor(fn_node),
+        is_async=_is_async_function(fn_node),
     )
 
 

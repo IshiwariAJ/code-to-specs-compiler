@@ -44,6 +44,7 @@ TYPESCRIPT_PROFILE = LanguageProfile(
     while_node_type="while_statement",
     do_while_node_type="do_statement",
     switch_node_type="switch_statement",
+    await_expression_type="await_expression",
 )
 
 

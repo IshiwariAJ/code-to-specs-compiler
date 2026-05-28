@@ -45,6 +45,7 @@ PYTHON_PROFILE = LanguageProfile(
     while_node_type="while_statement",
     # Python に do-while は存在しない
     switch_node_type="match_statement",
+    await_expression_type="await",
 )
 
 
