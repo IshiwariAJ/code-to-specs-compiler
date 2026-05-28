@@ -250,6 +250,20 @@ class TryCatchNode:
     comment: str = ""
 
 
+@dataclass(frozen=True)
+class SwitchNode:
+    """
+    switch / match 文。subject を評価して各 case に分岐する。
+
+    例: switch (status) { case "ACTIVE": ... }
+    例: match command: case "start": ...
+    """
+    kind: Literal["SwitchNode"]
+    subject: str               # switch/match の対象式（例: "status", "command"）
+    cases: tuple[CaseNode, ...]
+    comment: str = ""
+
+
 # すべての関数本体 IR ノード型のユニオン型エイリアス
 IRNode = Union[
     GuardClause,
@@ -259,6 +273,7 @@ IRNode = Union[
     SideEffect,
     ReturnNode,
     TryCatchNode,
+    SwitchNode,
 ]
 
 

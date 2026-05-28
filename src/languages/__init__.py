@@ -19,7 +19,7 @@ from typing import Callable, Optional
 from tree_sitter import Node
 
 from ..ir.profiles import LanguageProfile
-from ..ir.types import ClassSpec, DataTransformation, ImportSpec, IRNode, LoopNode, ModuleVariableSpec, ParamSpec, TypeDefinitionSpec
+from ..ir.types import ClassSpec, DataTransformation, ImportSpec, IRNode, LoopNode, ModuleVariableSpec, ParamSpec, SwitchNode, TypeDefinitionSpec
 
 
 @dataclass(frozen=True)
@@ -76,6 +76,11 @@ class LanguagePlugin:
 
     # ---------- 言語固有ロジックの拡張フック（デフォルト値あり）----------
 
+    # module_var_node_types に該当するノードから ModuleVariableSpec が生成されなかった場合に
+    # 警告文字列を返すフック（None のとき警告なし）。
+    # 使用例: TypeScript のアロー関数宣言（const f = () => {}）が変数として誤分類される問題を警告化
+    module_var_warning_extractor: Optional[Callable[[Node], Optional[str]]] = None
+
     # for ループ変換フック（None のとき mapper の汎用ロジックを使用）
     # シグネチャ: (for_node, extract_body_fn) -> Optional[LoopNode]
     #   extract_body_fn: 本体ノード → IRNode リスト を返すコールバック
@@ -88,6 +93,12 @@ class LanguagePlugin:
     # 使用例: Python（docstring）、PowerShell（<# .SYNOPSIS #>）
     # TypeScript / Go は None（関数直前コメントをそのまま使用）
     function_description_extractor: Optional[Callable[[Node], str]] = None
+
+    # switch / match 変換フック（None のとき switch は未対応）
+    # シグネチャ: (switch_node, extract_stmts_fn) -> Optional[SwitchNode]
+    #   extract_stmts_fn: statement ノードのリスト → IRNode リスト
+    # 使用例: TypeScript（switch_statement）、Python（match_statement）
+    switch_extractor: Optional[Callable[[Node, Callable[[list[Node]], list[IRNode]]], Optional[SwitchNode]]] = None
 
 
 def discover_plugins() -> dict[str, LanguagePlugin]:

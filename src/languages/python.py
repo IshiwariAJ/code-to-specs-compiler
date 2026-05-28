@@ -12,7 +12,7 @@ from tree_sitter import Node
 
 from ..ir.node_utils import extract_node_text, normalize_whitespace
 from ..ir.profiles import LanguageProfile
-from ..ir.types import ClassFieldSpec, ClassSpec, ImportSpec, ModuleVariableSpec, ParamSpec
+from ..ir.types import CaseNode, ClassFieldSpec, ClassSpec, ImportSpec, IRNode, ModuleVariableSpec, ParamSpec, SwitchNode
 from ..parser.python_parser import parse_python_source
 from . import LanguagePlugin
 
@@ -44,6 +44,7 @@ PYTHON_PROFILE = LanguageProfile(
     function_docstring_in_body=True,
     while_node_type="while_statement",
     # Python に do-while は存在しない
+    switch_node_type="match_statement",
 )
 
 
@@ -419,6 +420,47 @@ def extract_py_return_type(fn_node: Node) -> str:
 
 
 # ---------------------------------------------------------------------------
+# match 文抽出（Python 3.10+）
+# ---------------------------------------------------------------------------
+
+def extract_py_match(
+    match_node: Node,
+    extract_stmts: "Callable[[list[Node]], list[IRNode]]",
+) -> Optional[SwitchNode]:
+    """
+    Python の match_statement から SwitchNode を生成する。
+
+    match subject:
+        case pattern: body
+        case _: body  # default
+    """
+    named = match_node.named_children
+    if not named:
+        return None
+
+    subject = extract_node_text(named[0]).strip()
+
+    # named_children[1] は block
+    block_node = named[1] if len(named) > 1 else None
+    if block_node is None:
+        return None
+
+    cases: list[CaseNode] = []
+    for clause in block_node.named_children:
+        if clause.type != "case_clause":
+            continue
+        pattern_node = next((c for c in clause.named_children if c.type == "case_pattern"), None)
+        pattern = extract_node_text(pattern_node).strip() if pattern_node else ""
+        condition = "default" if pattern == "_" else pattern
+
+        body_block = next((c for c in clause.named_children if c.type == "block"), None)
+        body_stmts = list(body_block.named_children) if body_block else []
+        cases.append(CaseNode(condition_text=condition, body=tuple(extract_stmts(body_stmts))))
+
+    return SwitchNode(kind="SwitchNode", subject=subject, cases=tuple(cases))
+
+
+# ---------------------------------------------------------------------------
 # プラグイン定数（discover_plugins() が検出する）
 # ---------------------------------------------------------------------------
 
@@ -434,4 +476,5 @@ PLUGIN = LanguagePlugin(
     param_extractor=extract_py_params,
     return_type_extractor=extract_py_return_type,
     function_description_extractor=extract_py_function_docstring,  # docstring を関数説明として使用
+    switch_extractor=extract_py_match,
 )

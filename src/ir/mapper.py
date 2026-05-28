@@ -34,6 +34,7 @@ from .types import (
     ParamSpec,
     ReturnNode,
     SideEffect,
+    SwitchNode,
     TryCatchNode,
     TypeDefinitionSpec,
 )
@@ -1111,6 +1112,20 @@ def _map_statement_to_ir(
             warnings,
             scope,
         )
+
+    elif (
+        profile.switch_node_type
+        and node_type == profile.switch_node_type
+        and plugin.switch_extractor is not None
+    ):
+        def _extract_stmts(stmts: list[Node]) -> list[IRNode]:
+            result: list[IRNode] = []
+            for stmt in stmts:
+                ir = _map_statement_to_ir(stmt, profile, direct_stmt_map, plugin, warnings, scope)
+                if ir is not None:
+                    result.append(ir)
+            return result
+        ir_node = plugin.switch_extractor(statement_node, _extract_stmts)
 
     elif node_type == "expression_statement":
         ir_node = _map_expression_statement_to_ir(statement_node, profile)

@@ -174,6 +174,10 @@ class LanguageProfile:
     # それ以外: False
     function_docstring_in_body: bool = False
 
+    # switch / match 文のノードタイプ（"" = 未対応）
+    # TypeScript: "switch_statement"、Python: "match_statement"
+    switch_node_type: str = ""
+
     # while ループのノードタイプ（"" = 未対応）
     # TypeScript / Python / Java / PowerShell: "while_statement"
     while_node_type: str = ""

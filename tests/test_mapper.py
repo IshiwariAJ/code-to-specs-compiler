@@ -370,6 +370,82 @@ class TestTryCatchNode:
 
 
 # ---------------------------------------------------------------------------
+# switch / match 文（SwitchNode）の検出
+# ---------------------------------------------------------------------------
+
+
+class TestSwitchNode:
+    # --- TypeScript switch ---
+
+    def test_ts_switch_is_switch_node(self):
+        body = _ts_body("function f(s) { switch (s) { case 'A': return 1; } }")
+        from src.ir.types import SwitchNode
+        assert any(isinstance(n, SwitchNode) for n in body)
+
+    def test_ts_switch_subject_extracted(self):
+        from src.ir.types import SwitchNode
+        body = _ts_body("function f(status) { switch (status) { case 'A': return 1; } }")
+        sw = next(n for n in body if isinstance(n, SwitchNode))
+        assert sw.subject == "status"
+
+    def test_ts_switch_case_condition_extracted(self):
+        from src.ir.types import SwitchNode
+        body = _ts_body("function f(s) { switch (s) { case 'ACTIVE': return 1; case 'INACTIVE': return 2; } }")
+        sw = next(n for n in body if isinstance(n, SwitchNode))
+        assert sw.cases[0].condition_text == "'ACTIVE'"
+        assert sw.cases[1].condition_text == "'INACTIVE'"
+
+    def test_ts_switch_default_condition_is_default(self):
+        from src.ir.types import SwitchNode
+        body = _ts_body("function f(s) { switch (s) { default: return 0; } }")
+        sw = next(n for n in body if isinstance(n, SwitchNode))
+        assert sw.cases[0].condition_text == "default"
+
+    def test_ts_switch_case_body_extracted(self):
+        from src.ir.types import SwitchNode
+        body = _ts_body("function f(s) { switch (s) { case 'A': count += 1; return 1; } }")
+        sw = next(n for n in body if isinstance(n, SwitchNode))
+        assert len(sw.cases[0].body) == 2
+        assert isinstance(sw.cases[0].body[0], DataTransformation)
+        assert isinstance(sw.cases[0].body[1], ReturnNode)
+
+    def test_ts_switch_multiple_cases(self):
+        from src.ir.types import SwitchNode
+        src = "function f(s) { switch (s) { case 'A': return 1; case 'B': return 2; default: return 0; } }"
+        body = _ts_body(src)
+        sw = next(n for n in body if isinstance(n, SwitchNode))
+        assert len(sw.cases) == 3
+
+    # --- Python match ---
+
+    def test_py_match_is_switch_node(self):
+        from src.ir.types import SwitchNode
+        body = _py_body("def f(cmd):\n    match cmd:\n        case 'start':\n            start()\n")
+        assert any(isinstance(n, SwitchNode) for n in body)
+
+    def test_py_match_subject_extracted(self):
+        from src.ir.types import SwitchNode
+        body = _py_body("def f(command):\n    match command:\n        case 'start':\n            start()\n")
+        sw = next(n for n in body if isinstance(n, SwitchNode))
+        assert sw.subject == "command"
+
+    def test_py_match_case_condition_extracted(self):
+        from src.ir.types import SwitchNode
+        src = "def f(cmd):\n    match cmd:\n        case 'start':\n            a()\n        case 'stop':\n            b()\n"
+        body = _py_body(src)
+        sw = next(n for n in body if isinstance(n, SwitchNode))
+        assert sw.cases[0].condition_text == "'start'"
+        assert sw.cases[1].condition_text == "'stop'"
+
+    def test_py_match_wildcard_is_default(self):
+        from src.ir.types import SwitchNode
+        src = "def f(cmd):\n    match cmd:\n        case _:\n            raise ValueError()\n"
+        body = _py_body(src)
+        sw = next(n for n in body if isinstance(n, SwitchNode))
+        assert sw.cases[0].condition_text == "default"
+
+
+# ---------------------------------------------------------------------------
 # 繰り返し処理（LoopNode）の検出
 # ---------------------------------------------------------------------------
 

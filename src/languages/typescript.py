@@ -12,7 +12,7 @@ from tree_sitter import Node
 
 from ..ir.node_utils import extract_node_text, normalize_whitespace
 from ..ir.profiles import LanguageProfile
-from ..ir.types import ImportSpec, ModuleVariableSpec, ParamSpec, TypeDefinitionSpec
+from ..ir.types import CaseNode, ImportSpec, IRNode, ModuleVariableSpec, ParamSpec, SwitchNode, TypeDefinitionSpec
 from ..parser.ts_parser import parse_typescript_source
 from . import LanguagePlugin
 
@@ -43,6 +43,7 @@ TYPESCRIPT_PROFILE = LanguageProfile(
     class_node_types=frozenset(),  # TypeScript クラスは将来対応
     while_node_type="while_statement",
     do_while_node_type="do_statement",
+    switch_node_type="switch_statement",
 )
 
 
@@ -285,6 +286,52 @@ def extract_ts_return_type(fn_node: Node) -> str:
 
 
 # ---------------------------------------------------------------------------
+# switch 文抽出
+# ---------------------------------------------------------------------------
+
+def extract_ts_switch(
+    switch_node: Node,
+    extract_stmts: "Callable[[list[Node]], list[IRNode]]",
+) -> Optional[SwitchNode]:
+    """
+    TypeScript の switch_statement から SwitchNode を生成する。
+
+    switch (subject) {
+      case X: stmts...
+      default: stmts...
+    }
+    """
+    from typing import Callable  # noqa: PLC0415 — ローカルインポートで循環回避
+
+    subject_node = next(
+        (c for c in switch_node.named_children if c.type == "parenthesized_expression"),
+        None,
+    )
+    subject = normalize_whitespace(extract_node_text(subject_node)).strip("()") if subject_node else ""
+
+    body_node = next(
+        (c for c in switch_node.named_children if c.type == "switch_body"),
+        None,
+    )
+    if body_node is None:
+        return None
+
+    cases: list[CaseNode] = []
+    for case_node in body_node.named_children:
+        if case_node.type == "switch_case":
+            value_node = case_node.child_by_field_name("value")
+            condition = extract_node_text(value_node).strip() if value_node else ""
+            # body = value 以外の named_children（value_node の後のすべての文）
+            body_stmts = [c for c in case_node.named_children if c is not value_node]
+            cases.append(CaseNode(condition_text=condition, body=tuple(extract_stmts(body_stmts))))
+        elif case_node.type == "switch_default":
+            body_stmts = list(case_node.named_children)
+            cases.append(CaseNode(condition_text="default", body=tuple(extract_stmts(body_stmts))))
+
+    return SwitchNode(kind="SwitchNode", subject=subject, cases=tuple(cases))
+
+
+# ---------------------------------------------------------------------------
 # プラグイン定数（discover_plugins() が検出する）
 # ---------------------------------------------------------------------------
 
@@ -300,4 +347,5 @@ PLUGIN = LanguagePlugin(
     param_extractor=extract_ts_params,
     return_type_extractor=extract_ts_return_type,
     module_var_warning_extractor=ts_module_var_warning,
+    switch_extractor=extract_ts_switch,
 )

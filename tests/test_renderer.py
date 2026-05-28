@@ -20,6 +20,7 @@ from src.ir.types import (
     ModuleVariableSpec,
     ReturnNode,
     SideEffect,
+    SwitchNode,
     TryCatchNode,
     TypeDefinitionSpec,
 )
@@ -273,6 +274,46 @@ class TestRenderLoopNode:
 # ---------------------------------------------------------------------------
 # TryCatchNode のレンダリング
 # ---------------------------------------------------------------------------
+
+
+class TestRenderSwitchNode:
+    def test_switch_header_contains_subject(self):
+        node = SwitchNode(kind="SwitchNode", subject="status", cases=())
+        output = _render_single_node(node)
+        assert "switch" in output
+        assert "status" in output
+
+    def test_switch_case_condition_appears(self):
+        case = CaseNode(condition_text="'ACTIVE'", body=())
+        node = SwitchNode(kind="SwitchNode", subject="status", cases=(case,))
+        output = _render_single_node(node)
+        assert "'ACTIVE'" in output
+
+    def test_switch_default_renders_as_default(self):
+        case = CaseNode(condition_text="default", body=())
+        node = SwitchNode(kind="SwitchNode", subject="status", cases=(case,))
+        output = _render_single_node(node)
+        assert "default" in output
+        assert "case default" not in output  # "case default:" ではなく "default:" と出力される
+
+    def test_switch_case_body_is_indented(self):
+        nested = ReturnNode(kind="ReturnNode", action="return", value_text="1")
+        case = CaseNode(condition_text="'A'", body=(nested,))
+        node = SwitchNode(kind="SwitchNode", subject="s", cases=(case,))
+        output = _render_single_node(node)
+        assert "  *" in output  # ネストしてインデントされている
+
+    def test_switch_multiple_cases_all_appear(self):
+        cases = (
+            CaseNode(condition_text="'A'", body=()),
+            CaseNode(condition_text="'B'", body=()),
+            CaseNode(condition_text="default", body=()),
+        )
+        node = SwitchNode(kind="SwitchNode", subject="s", cases=cases)
+        output = _render_single_node(node)
+        assert "'A'" in output
+        assert "'B'" in output
+        assert "default" in output
 
 
 class TestRenderTryCatchNode:

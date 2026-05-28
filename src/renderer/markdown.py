@@ -29,6 +29,7 @@ from src.ir.types import (
     ParamSpec,
     ReturnNode,
     SideEffect,
+    SwitchNode,
     TryCatchNode,
     TypeDefinitionSpec,
 )
@@ -574,6 +575,33 @@ def _render_try_catch_node(node: TryCatchNode, index: int) -> str:
 
 
 # ---------------------------------------------------------------------------
+# レンダリング: SwitchNode
+# ---------------------------------------------------------------------------
+
+
+def _render_switch_node(node: SwitchNode, index: int) -> str:
+    """SwitchNode IR ノードを Markdown テキストに変換する。"""
+    prefix = f"### {index}. 🔀 条件分岐（switch: `{node.subject}`）" if index > 0 \
+        else f"* 🔀 条件分岐（switch: `{node.subject}`）"
+    lines = [prefix]
+
+    if node.comment:
+        comment_line = _render_comment_blockquote(node.comment)
+        if comment_line:
+            lines.append(comment_line)
+
+    for case in node.cases:
+        label = "default" if case.condition_text == "default" else f'case {case.condition_text}'
+        lines.append(f"* **{label}:**")
+        for body_node in case.body:
+            body_text = _render_ir_node(body_node, index=0)
+            for line in body_text.splitlines():
+                lines.append(f"  {line}")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # ディスパッチ: IRNode の型に応じてレンダリング関数を呼び分ける
 # ---------------------------------------------------------------------------
 
@@ -600,6 +628,9 @@ def _render_ir_node(node: IRNode, index: int) -> str:
 
     if isinstance(node, TryCatchNode):
         return _render_try_catch_node(node, index)
+
+    if isinstance(node, SwitchNode):
+        return _render_switch_node(node, index)
 
     if isinstance(node, DataTransformation):
         return _render_data_transformation(node, index)
