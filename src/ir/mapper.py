@@ -1093,6 +1093,45 @@ def _format_unmapped_statement_warning(statement: Node, scope: str) -> str:
     return f"{scope_prefix}{statement.type} は未対応のため仕様化されませんでした: `{snippet}`"
 
 
+def _is_docstring_statement(statement: Node) -> bool:
+    """
+    `expression_statement` の唯一の named child が `string` であるか判定する。
+
+    Python の関数 / クラス body 先頭に置かれる docstring は
+    `expression_statement → string` の構造で出現する。function_description_extractor が
+    description として既に取り込んでいるため、body 反復時には警告対象から除外する。
+    """
+    if statement.type != "expression_statement":
+        return False
+    named = statement.named_children
+    return len(named) == 1 and named[0].type == "string"
+
+
+# 「意味のある処理を行わない」ことが構文上明らかなノードタイプ
+# 警告に出すと「未対応構文」と誤読されるため body 反復時に silent skip する
+# （未対応ではなく、定義上 no-op であるため）
+_NO_OP_STATEMENT_NODE_TYPES: frozenset[str] = frozenset({
+    "pass_statement",   # Python: `pass`（空 body の syntactic placeholder）
+})
+
+
+def _is_no_op_statement(statement: Node) -> bool:
+    """
+    構文上 no-op であることが明らかな文か判定する。
+
+    対象:
+    - `pass_statement`: Python の `pass`
+    - `expression_statement` 配下が `ellipsis` のみ: Python の `...`（スタブ慣用句）
+    """
+    if statement.type in _NO_OP_STATEMENT_NODE_TYPES:
+        return True
+    if statement.type == "expression_statement":
+        named = statement.named_children
+        if len(named) == 1 and named[0].type == "ellipsis":
+            return True
+    return False
+
+
 def _extract_body_ir_nodes(
     body_node: Node,
     profile: LanguageProfile,
@@ -1106,7 +1145,23 @@ def _extract_body_ir_nodes(
     マッピング可能な IRNode の一覧を返す。
     """
     results: list[IRNode] = []
-    for statement in _get_block_statements(body_node, profile):
+    statements = _get_block_statements(body_node, profile)
+
+    # body 先頭の docstring は function_description_extractor が description として
+    # 既に取り込んでいるため、warnings に重複計上しないようスキップする（Python のみ）。
+    if (
+        profile.function_docstring_in_body
+        and statements
+        and _is_docstring_statement(statements[0])
+    ):
+        statements = statements[1:]
+
+    for statement in statements:
+        # 構文上 no-op の文（pass / ...）は「未対応構文」ではないので
+        # IR にも警告にも乗せず silent skip する。
+        if _is_no_op_statement(statement):
+            continue
+
         ir_node = _map_statement_to_ir(
             statement,
             profile,
@@ -1314,6 +1369,78 @@ def _extract_all_class_definitions(
 
 
 # ---------------------------------------------------------------------------
+# トップレベル未対応宣言の警告化
+# ---------------------------------------------------------------------------
+
+
+# どの抽出器にもマッチしないが、警告に出すと監査ノイズになるノードタイプ
+# - comment / line_comment / block_comment: ファイル冒頭は file_comment、関数前は preceding_comment で取り込み済み
+#   （言語によって名前が異なる: TypeScript/Python/Go/PowerShell は `comment`、Java は `line_comment` / `block_comment`）
+# - package_clause:      Go の `package main`（ファイルメタデータ）
+# - package_declaration: Java の `package com.foo`（ファイルメタデータ）
+_TOP_LEVEL_IGNORED_NODE_TYPES: frozenset[str] = frozenset({
+    "comment",
+    "line_comment",
+    "block_comment",
+    "package_clause",
+    "package_declaration",
+})
+
+
+def _collect_recognized_top_level_types(plugin: "LanguagePlugin") -> frozenset[str]:
+    """LanguagePlugin が認識するトップレベルノードタイプの集合を返す。"""
+    profile = plugin.profile
+    types: set[str] = set()
+    types.update(profile.import_node_types)
+    types.update(profile.module_var_node_types)
+    if profile.type_alias_node_type:
+        types.add(profile.type_alias_node_type)
+    if profile.interface_node_type:
+        types.add(profile.interface_node_type)
+    types.update(profile.class_node_types)
+    if profile.function_node_type:
+        types.add(profile.function_node_type)
+    return frozenset(types)
+
+
+def _collect_top_level_extraction_warnings(
+    root_node: Node, plugin: "LanguagePlugin"
+) -> list[str]:
+    """
+    トップレベルで認識されなかった宣言を警告化する。
+
+    profile に登録された抽出対象（imports / module_vars / type defs / classes / functions）の
+    いずれにもマッチしなかった named child は、監査用途で重要なので警告に追加する。
+    例: TypeScript の class_declaration、Go の type_declaration、PowerShell の class_definition。
+
+    file_comment として既に取り込んだファイル先頭の string-only expression_statement
+    （Python のモジュール docstring）は警告対象から除外する。
+    """
+    recognized = _collect_recognized_top_level_types(plugin)
+    profile = plugin.profile
+    warnings: list[str] = []
+    module_docstring_skipped = not profile.has_module_docstring
+
+    for node in _get_top_level_nodes(root_node, profile):
+        if node.type in recognized or node.type in _TOP_LEVEL_IGNORED_NODE_TYPES:
+            module_docstring_skipped = True
+            continue
+
+        # Python のモジュール docstring（ファイル先頭の string-only expression_statement）は
+        # file_comment として取り込み済みのため警告対象から除外する。
+        # 「先頭のみ」の判定: profile.has_module_docstring が True で、まだ最初の named child を
+        # 通過していない場合に限定する。
+        if not module_docstring_skipped and _is_docstring_statement(node):
+            module_docstring_skipped = True
+            continue
+
+        warnings.append(_format_unmapped_statement_warning(node, scope="トップレベル"))
+        module_docstring_skipped = True
+
+    return warnings
+
+
+# ---------------------------------------------------------------------------
 # 公開インターフェース
 # ---------------------------------------------------------------------------
 
@@ -1336,7 +1463,7 @@ def map_source_to_module_spec(
     """
     profile = plugin.profile
     direct_stmt_map: _DirectStmtMap = dict(plugin.direct_statement_extractors)
-    warnings: list[str] = []
+    warnings: list[str] = _collect_top_level_extraction_warnings(root_node, plugin)
 
     return ModuleSpec(
         name=module_name,

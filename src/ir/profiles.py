@@ -168,3 +168,8 @@ class LanguageProfile:
     # "" (デフォルト): root_node.named_children から直接検索
     # "statement_list": root → statement_list → 関数（PowerShell 用）
     top_level_wrapper_type: str = ""
+
+    # 関数 body の先頭に string-only な expression_statement が docstring として現れるか
+    # Python: True（`"""..."""` が body 先頭に置かれ、description として抽出済みのため body 反復時にスキップする）
+    # それ以外: False
+    function_docstring_in_body: bool = False

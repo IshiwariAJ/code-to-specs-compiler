@@ -747,6 +747,71 @@ class TestCommentExtraction:
         spec = _py_module(src)
         assert "単行docstring" in spec.functions[0].description
 
+    def test_py_docstring_not_listed_in_extraction_warnings(self):
+        """関数 docstring は description として抽出済みなので警告に含めない。"""
+        src = (
+            'def calc(x: int) -> int:\n'
+            '    """これは関数の説明 docstring。"""\n'
+            '    return x + 1\n'
+        )
+        spec = _py_module(src)
+        for warning in spec.extraction_warnings:
+            assert "docstring" not in warning
+            assert "これは関数の説明" not in warning
+
+    def test_py_triple_quoted_docstring_only_function_has_no_warnings(self):
+        """docstring 単独の関数（pass すらない）でも警告に出ない。"""
+        src = 'def f():\n    """説明のみ。"""\n'
+        spec = _py_module(src)
+        assert spec.extraction_warnings == ()
+
+    def test_py_single_quoted_docstring_excluded_from_warnings(self):
+        """単行 docstring も警告から除外される。"""
+        src = "def f():\n    '単行docstring'\n    pass\n"
+        spec = _py_module(src)
+        for warning in spec.extraction_warnings:
+            assert "単行docstring" not in warning
+
+    def test_py_string_only_statement_in_middle_still_warned(self):
+        """body 途中の string-only expression_statement は docstring ではないので警告対象のまま。"""
+        src = (
+            'def f():\n'
+            '    """先頭の docstring。"""\n'
+            '    x = 1\n'
+            '    "中間の浮いた文字列"\n'
+            '    return x\n'
+        )
+        spec = _py_module(src)
+        warnings_text = "\n".join(spec.extraction_warnings)
+        assert "中間の浮いた文字列" in warnings_text
+        assert "先頭の docstring" not in warnings_text
+
+    # --- Python no-op 文（pass / ...）は警告に出ない ---
+
+    def test_py_pass_statement_does_not_warn(self):
+        """`pass` は syntactic placeholder であって未対応構文ではないため警告に出ない。"""
+        src = "def f():\n    pass\n"
+        spec = _py_module(src)
+        assert spec.extraction_warnings == ()
+
+    def test_py_ellipsis_stub_does_not_warn(self):
+        """`...` を body とするスタブ関数も警告に出ない。"""
+        src = "def f():\n    ...\n"
+        spec = _py_module(src)
+        assert spec.extraction_warnings == ()
+
+    def test_py_pass_mixed_with_real_statements_does_not_warn_pass(self):
+        """body 内に意味のある文と pass が混在しても、pass 自体は警告に出ない。"""
+        src = (
+            "def f(x):\n"
+            "    if x < 0:\n"
+            "        pass\n"
+            "    return x\n"
+        )
+        spec = _py_module(src)
+        warnings_text = "\n".join(spec.extraction_warnings)
+        assert "pass_statement" not in warnings_text
+
     # --- TypeScript ファイルヘッダーコメント ---
 
     def test_ts_file_header_comment_extracted(self):
@@ -1955,3 +2020,113 @@ class TestJavaTryCatchNode:
         assert isinstance(node.catch_body[0], SideEffect)
         assert isinstance(node.catch_body[1], ReturnNode)
         assert isinstance(node.finally_body[0], SideEffect)
+
+
+# ---------------------------------------------------------------------------
+# トップレベル未対応宣言の警告化
+# ---------------------------------------------------------------------------
+
+
+class TestTopLevelExtractionWarnings:
+    """トップレベルで認識されなかった宣言が extraction_warnings に追加されるか検証。"""
+
+    # --- TypeScript: class_declaration は未対応 → 警告 ---
+
+    def test_ts_class_declaration_appears_in_warnings(self):
+        src = "class AuditLog { add(message: string): void {} }\n"
+        spec = _ts_module(src)
+        warnings_text = "\n".join(spec.extraction_warnings)
+        assert "class_declaration" in warnings_text
+        assert "AuditLog" in warnings_text
+
+    def test_ts_class_warning_has_top_level_scope(self):
+        src = "class Foo {}\n"
+        spec = _ts_module(src)
+        warnings_text = "\n".join(spec.extraction_warnings)
+        assert "トップレベル" in warnings_text
+
+    def test_ts_recognized_top_level_does_not_warn(self):
+        """interface / type / function / import / const は警告に出ない。"""
+        src = (
+            "import { x } from 'm';\n"
+            "const y = 1;\n"
+            "type T = string;\n"
+            "interface I { a: number }\n"
+            "function f() {}\n"
+        )
+        spec = _ts_module(src)
+        assert spec.extraction_warnings == ()
+
+    def test_ts_top_level_console_log_appears_in_warnings(self):
+        """モジュール直下の expression_statement は recognized 集合に含まれず警告される。"""
+        src = 'console.log("at module top");\n'
+        spec = _ts_module(src)
+        warnings_text = "\n".join(spec.extraction_warnings)
+        assert "expression_statement" in warnings_text
+
+    # --- Go: type_declaration は未対応 → 警告 / package_clause は無視 ---
+
+    def test_go_type_declaration_appears_in_warnings(self):
+        src = (
+            "package main\n\n"
+            "type Purchase struct {\n"
+            "    Price int\n"
+            "}\n"
+        )
+        spec = _go_module(src)
+        warnings_text = "\n".join(spec.extraction_warnings)
+        assert "type_declaration" in warnings_text
+        assert "Purchase" in warnings_text
+
+    def test_go_package_clause_does_not_warn(self):
+        src = "package main\n\nfunc f() {}\n"
+        spec = _go_module(src)
+        warnings_text = "\n".join(spec.extraction_warnings)
+        assert "package_clause" not in warnings_text
+
+    def test_go_recognized_top_level_does_not_warn(self):
+        """import / const / var / func は警告に出ない。"""
+        src = (
+            "package main\n\n"
+            'import "fmt"\n\n'
+            "const Max = 10\n"
+            "var counter = 0\n"
+            "func f() {}\n"
+        )
+        spec = _go_module(src)
+        assert spec.extraction_warnings == ()
+
+    # --- Python: モジュール docstring とコメントは無視 ---
+
+    def test_py_module_docstring_does_not_warn(self):
+        src = '"""モジュールの説明。"""\n\ndef f():\n    pass\n'
+        spec = _py_module(src)
+        warnings_text = "\n".join(spec.extraction_warnings)
+        assert "モジュールの説明" not in warnings_text
+
+    def test_py_top_level_comment_does_not_warn(self):
+        src = "# ファイル冒頭コメント\ndef f():\n    pass\n"
+        spec = _py_module(src)
+        assert spec.extraction_warnings == ()
+
+    def test_py_class_definition_is_recognized(self):
+        """Python の class は class_extractor が処理するので警告しない。"""
+        src = "class Foo:\n    x: int = 0\n"
+        spec = _py_module(src)
+        assert spec.extraction_warnings == ()
+
+    # --- PowerShell: class は未対応 → 警告 ---
+
+    def test_ps_class_definition_appears_in_warnings(self):
+        src = (
+            "class Purchase {\n"
+            "    [int]$Price\n"
+            "}\n"
+            "function Get-Foo {}\n"
+        )
+        spec = _ps_module(src)
+        warnings_text = "\n".join(spec.extraction_warnings)
+        # PowerShell の class 文ノードは class_statement / class_definition のいずれか
+        # tree-sitter-powershell の実装に依存するため、'class' という単語が警告に
+        # 含まれていることを確認する（ノードタイプ・スニペット双方を含む）。
+        assert "Purchase" in warnings_text

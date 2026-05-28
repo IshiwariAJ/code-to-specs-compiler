@@ -41,6 +41,7 @@ PYTHON_PROFILE = LanguageProfile(
     for_loop_flavor="always_foreach",
     direct_statement_types=frozenset(),
     class_node_types=frozenset({"decorated_definition", "class_definition"}),
+    function_docstring_in_body=True,
 )
 
 
