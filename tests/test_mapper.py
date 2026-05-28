@@ -465,6 +465,31 @@ class TestSwitchNode:
         sw = next(n for n in body if isinstance(n, SwitchNode))
         assert sw.cases[0].condition_text == "default"
 
+    # --- PowerShell switch ---
+
+    def test_ps_switch_is_switch_node(self):
+        from src.ir.types import SwitchNode
+        src = 'function f { switch ($status) { "ACTIVE" { $total += 1 } } }'
+        body = _ps_body(src)
+        assert any(isinstance(n, SwitchNode) for n in body)
+
+    def test_ps_switch_subject_extracted(self):
+        from src.ir.types import SwitchNode
+        src = 'function f { switch ($user.Status) { "ACTIVE" { $total += 1 } } }'
+        body = _ps_body(src)
+        sw = next(n for n in body if isinstance(n, SwitchNode))
+        assert sw.subject == "$user.Status"
+
+    def test_ps_switch_cases_and_body_extracted(self):
+        from src.ir.types import SwitchNode
+        src = 'function f { switch ($status) { "ACTIVE" { $total += 1 }\n default { $total += 0 } } }'
+        body = _ps_body(src)
+        sw = next(n for n in body if isinstance(n, SwitchNode))
+        assert len(sw.cases) == 2
+        assert sw.cases[0].condition_text == '"ACTIVE"'
+        assert sw.cases[1].condition_text == "default"
+        assert isinstance(sw.cases[0].body[0], DataTransformation)
+
 
 # ---------------------------------------------------------------------------
 # 繰り返し処理（LoopNode）の検出
@@ -499,6 +524,13 @@ class TestLoopNode:
         body = _ts_body("function f(n) { for (let i = 0; i < n; i++) { s += i; } }")
         loop = next(n for n in body if isinstance(n, LoopNode))
         assert loop.iterator == "i"
+
+    def test_powershell_for_statement_is_for_range(self):
+        body = _ps_body("function f { for ($i = 0; $i -lt 10; $i++) { $total += $i } }")
+        loop = next(n for n in body if isinstance(n, LoopNode))
+        assert loop.loop_type == "FOR_RANGE"
+        assert loop.iterator == "$i"
+        assert "$i = 0; $i -lt 10; $i++" in loop.collection
 
     def test_python_for_in_is_for_each(self):
         body = _py_body("def f(arr):\n    for item in arr:\n        total += item\n")
@@ -816,16 +848,17 @@ class TestModuleVariableSpec:
         spec = _ts_module("const greet = (name: string): string => name;\nfunction f() {}")
         assert all(v.name != "greet" for v in spec.module_variables)
 
-    def test_ts_arrow_function_generates_warning(self):
+    def test_ts_arrow_function_is_extracted_as_function(self):
         """アロー関数は extraction_warnings に追加される。"""
         spec = _ts_module("const greet = (name: string): string => name;\nfunction f() {}")
-        assert any("greet" in w for w in spec.extraction_warnings)
+        assert any(fn.name == "greet" for fn in spec.functions)
 
-    def test_ts_arrow_function_warning_mentions_function(self):
+    def test_ts_arrow_function_expression_body_becomes_return_node(self):
         """警告メッセージに function 宣言への変換について言及する。"""
         spec = _ts_module("const fn = (x: number) => x + 1;\nfunction f() {}")
-        warning = next(w for w in spec.extraction_warnings if "fn" in w)
-        assert "function" in warning
+        arrow = next(fn for fn in spec.functions if fn.name == "fn")
+        assert isinstance(arrow.body[0], ReturnNode)
+        assert arrow.body[0].value_text == "x + 1"
 
     def test_ts_non_arrow_const_still_captured(self):
         """通常の const はアロー関数修正後も module_variables に残る。"""
@@ -838,7 +871,25 @@ class TestModuleVariableSpec:
         src = "const process = (items: string[]): void => {\n  items.forEach(i => console.log(i));\n};\nfunction f() {}"
         spec = _ts_module(src)
         assert all(v.name != "process" for v in spec.module_variables)
-        assert any("process" in w for w in spec.extraction_warnings)
+        assert any(fn.name == "process" for fn in spec.functions)
+
+    def test_ts_async_arrow_function_is_marked_async(self):
+        spec = _ts_module("const load = async (id: string): Promise<User> => fetchUser(id);\nfunction f() {}")
+        arrow = next(fn for fn in spec.functions if fn.name == "load")
+        assert arrow.is_async is True
+
+    def test_ts_arrow_function_params_and_return_type_extracted(self):
+        spec = _ts_module("const load = (id: string, limit = 10): Promise<User> => fetchUser(id);\nfunction f() {}")
+        arrow = next(fn for fn in spec.functions if fn.name == "load")
+        assert arrow.return_type == "Promise<User>"
+        assert arrow.params[0].name == "id"
+        assert arrow.params[0].type_text == "string"
+        assert arrow.params[1].name == "limit"
+        assert arrow.params[1].default_text == "10"
+
+    def test_ts_arrow_function_no_extraction_warning(self):
+        spec = _ts_module("const greet = (name: string): string => name;\nfunction f() {}")
+        assert not any("greet" in w for w in spec.extraction_warnings)
 
 
 # ---------------------------------------------------------------------------

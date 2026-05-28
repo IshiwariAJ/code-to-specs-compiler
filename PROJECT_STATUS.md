@@ -1,6 +1,6 @@
 # 自然言語コンパイラ — プロジェクト進捗管理
 
-最終更新: 2026-05-28（レビュー指摘対応: ドキュメント更新 / switch case 警告回帰テスト）
+最終更新: 2026-05-28（TypeScript アロー関数 / PowerShell switch・for 対応）
 
 ---
 
@@ -25,22 +25,23 @@ Phase R7 ██████████ 完了     例外処理のネスト IR �
 Phase R8 ██████████ 完了     Python 誤警告バグ修正（docstring / pass / ellipsis）
 Phase R9 ██████████ 完了     async / await マーカー（is_async / is_awaited フィールド、全言語対応）
 Phase R10 ██████████ 完了    レビュー指摘対応（テスト件数更新 / switch case 内未対応文の回帰テスト）
+Phase R11 ██████████ 完了    TypeScript アロー関数 / PowerShell switch・for 対応
 ```
 
 ---
 
 ## 現在の検証状況
 
-**521件 全グリーン**（2026-05-28 時点）
+**530件 全グリーン**（2026-05-28 時点）
 
 | テストファイル | 件数 |
 |---|---|
-| `tests/test_mapper.py` | 267件 |
+| `tests/test_mapper.py` | 274件 |
 | `tests/test_renderer.py` | 125件 |
-| `tests/test_pipeline.py` | 90件 |
+| `tests/test_pipeline.py` | 92件 |
 | `tests/test_batch.py` | 39件 |
 
-直近の補強として、PowerShell の `$Script:Name = value` を `ModuleVariableSpec` として抽出し、抽出できないトップレベル `pipeline` を警告として残す回帰テストを追加した。
+直近の補強として、TypeScript の `const fn = (...) => ...` を `FunctionSpec` として抽出し、PowerShell の `switch` / C-style `for` を既存IRへマッピングした。
 
 ---
 
@@ -659,14 +660,13 @@ class ClassSpec:
 
 ## 既知の制限事項
 
-1. **アロー関数は未対応**: `const fn = () => {}` 形式の関数は検出しない（TypeScript のみ）
-2. **Python クラスメソッドの本体は展開しない**: Python のクラスメソッドは名前一覧のみ表示（Java / クラスベース言語ではメソッド処理フローを詳細出力）
-3. **ネストした関数は未対応**: 内部関数宣言は無視される
-4. **型情報なし**: 変数の型（`User`, `number` 等）は仕様書に含まれない
-5. **変数名依存**: 意味不明な変数名（`x`, `tmp`）の場合、出力も意味不明になる
-6. **Go の for ループ関数は mapper.py に残存**: for-range / for-clause 関数は `_extract_body_ir_nodes` に依存するため循環インポート回避のため `mapper.py` に保持している
-7. **Python クラスのフィールド説明はインラインコメントのみ取得**: `name: str  # 説明` の形式のみ対応。フィールド前の複数行ブロックコメントは仕様上無視する（次フィールドの前置コメントと区別できないため）
-8. **TypeScript / Go のクラス定義は未対応**: TypeScript `class` / Go の `struct` は将来フェーズで対応予定
+1. **Python クラスメソッドの本体は展開しない**: Python のクラスメソッドは名前一覧のみ表示（Java / クラスベース言語ではメソッド処理フローを詳細出力）
+2. **ネストした関数は未対応**: 内部関数宣言は無視される
+3. **型情報なし**: 変数の型（`User`, `number` 等）は仕様書に含まれない
+4. **変数名依存**: 意味不明な変数名（`x`, `tmp`）の場合、出力も意味不明になる
+5. **Go の for ループ関数は mapper.py に残存**: for-range / for-clause 関数は `_extract_body_ir_nodes` に依存するため循環インポート回避のため `mapper.py` に保持している
+6. **Python クラスのフィールド説明はインラインコメントのみ取得**: `name: str  # 説明` の形式のみ対応。フィールド前の複数行ブロックコメントは仕様上無視する（次フィールドの前置コメントと区別できないため）
+7. **TypeScript / Go のクラス定義は未対応**: TypeScript `class` / Go の `struct` は将来フェーズで対応予定
 
 ---
 

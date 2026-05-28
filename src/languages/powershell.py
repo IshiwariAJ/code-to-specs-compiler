@@ -23,6 +23,7 @@ from tree_sitter import Node
 from ..ir.node_utils import extract_node_text, normalize_whitespace
 from ..ir.profiles import LanguageProfile
 from ..ir.types import (
+    CaseNode,
     DataTransformation,
     ImportSpec,
     IRNode,
@@ -30,6 +31,7 @@ from ..ir.types import (
     ModuleVariableSpec,
     ParamSpec,
     SideEffect,
+    SwitchNode,
 )
 from ..parser.powershell_parser import parse_powershell_source
 from . import LanguagePlugin
@@ -42,7 +44,7 @@ POWERSHELL_PROFILE = LanguageProfile(
     name="powershell",
     function_node_type="function_statement",
     for_each_node_type="foreach_statement",
-    for_range_node_type="",              # PowerShell の for は将来対応
+    for_range_node_type="for_statement",
     guard_action_types=frozenset({"flow_control_statement"}),
     condition_has_outer_parens=False,    # condition フィールドが pipeline（括弧なし）を返す
     augmented_assignment_type="",        # PowerShell は pipeline 内の assignment_expression
@@ -61,6 +63,7 @@ POWERSHELL_PROFILE = LanguageProfile(
     class_node_types=frozenset(),        # PowerShell class は将来対応
     while_node_type="while_statement",
     do_while_node_type="do_statement",
+    switch_node_type="switch_statement",
     # 言語固有アクセス方法
     if_then_block_access="statement_block_child",
     function_name_access="function_name_child",
@@ -317,6 +320,53 @@ def map_ps_pipeline_to_ir(pipeline_node: Node) -> Optional[IRNode]:
 # 引数抽出
 # ---------------------------------------------------------------------------
 
+def extract_ps_switch(
+    switch_node: Node,
+    extract_stmts: "Callable[[list[Node]], list[IRNode]]",
+) -> Optional[SwitchNode]:
+    """PowerShell の switch_statement を SwitchNode IR に変換する。"""
+    condition_node = next(
+        (c for c in switch_node.named_children if c.type == "switch_condition"),
+        None,
+    )
+    subject = normalize_whitespace(extract_node_text(condition_node)).strip("()") if condition_node else ""
+
+    body_node = next(
+        (c for c in switch_node.named_children if c.type == "switch_body"),
+        None,
+    )
+    if body_node is None:
+        return None
+
+    clauses_node = next(
+        (c for c in body_node.named_children if c.type == "switch_clauses"),
+        None,
+    )
+    if clauses_node is None:
+        return None
+
+    cases: list[CaseNode] = []
+    for clause in clauses_node.named_children:
+        if clause.type != "switch_clause":
+            continue
+        condition = next(
+            (c for c in clause.named_children if c.type == "switch_clause_condition"),
+            None,
+        )
+        block = next((c for c in clause.named_children if c.type == "statement_block"), None)
+        stmt_list = next(
+            (c for c in block.named_children if c.type == "statement_list"),
+            None,
+        ) if block is not None else None
+        body_stmts = list(stmt_list.named_children) if stmt_list is not None else []
+        condition_text = normalize_whitespace(extract_node_text(condition)) if condition is not None else ""
+        if condition_text.lower() == "default":
+            condition_text = "default"
+        cases.append(CaseNode(condition_text=condition_text, body=tuple(extract_stmts(body_stmts))))
+
+    return SwitchNode(kind="SwitchNode", subject=subject, cases=tuple(cases))
+
+
 def _get_type_text_from_attribute_list(attr_list: Node) -> str:
     """
     attribute_list → attribute → type_literal → type_spec → type_name → type_identifier
@@ -416,4 +466,5 @@ PLUGIN = LanguagePlugin(
     return_type_extractor=extract_ps_return_type,
     for_loop_mapper=ps_for_loop_mapper,                              # foreach 構文差異を吸収
     function_description_extractor=extract_ps_function_description,  # <# .SYNOPSIS #> を使用
+    switch_extractor=extract_ps_switch,
 )

@@ -767,9 +767,18 @@ def _map_for_each_to_loop(
 
 def _extract_for_range_summary(for_node: Node) -> str:
     """古典的 for 文（TypeScript のみ）の範囲サマリーを返す。"""
-    initializer = for_node.child_by_field_name("initializer")
-    condition = for_node.child_by_field_name("condition")
-    increment = for_node.child_by_field_name("increment")
+    initializer = for_node.child_by_field_name("initializer") or next(
+        (c for c in for_node.named_children if c.type == "for_initializer"),
+        None,
+    )
+    condition = for_node.child_by_field_name("condition") or next(
+        (c for c in for_node.named_children if c.type == "for_condition"),
+        None,
+    )
+    increment = for_node.child_by_field_name("increment") or next(
+        (c for c in for_node.named_children if c.type == "for_iterator"),
+        None,
+    )
 
     init_text = extract_node_text(initializer).rstrip(";").strip() if initializer is not None else ""
     cond_text = extract_node_text(condition).strip() if condition is not None else ""
@@ -780,7 +789,10 @@ def _extract_for_range_summary(for_node: Node) -> str:
 
 def _extract_for_range_iterator(for_node: Node) -> str:
     """古典的 for 文（TypeScript のみ）のカウンタ変数名を返す。"""
-    initializer = for_node.child_by_field_name("initializer")
+    initializer = for_node.child_by_field_name("initializer") or next(
+        (c for c in for_node.named_children if c.type == "for_initializer"),
+        None,
+    )
     if initializer is None:
         return "i"
 
@@ -790,6 +802,9 @@ def _extract_for_range_iterator(for_node: Node) -> str:
             if name_node is not None:
                 return extract_node_text(name_node).strip()
 
+    init_text = extract_node_text(initializer).strip()
+    if "=" in init_text:
+        return init_text.split("=", 1)[0].strip()
     return "i"
 
 
@@ -802,7 +817,10 @@ def _map_for_range_to_loop(
     scope: str = "",
 ) -> LoopNode:
     """古典的 for 文（TypeScript のみ）を LoopNode IR（FOR_RANGE）に変換する。"""
-    body_node = for_node.child_by_field_name("body")
+    body_node = for_node.child_by_field_name("body") or next(
+        (c for c in for_node.named_children if c.type == "statement_block"),
+        None,
+    )
     nested_body = (
         _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin, warnings, scope)
         if body_node is not None
@@ -1367,6 +1385,8 @@ def _map_function_to_spec(
     direct_stmt_map: _DirectStmtMap,
     plugin: "LanguagePlugin",
     warnings: list[str] | None = None,
+    name_override: str | None = None,
+    description_node: Node | None = None,
 ) -> FunctionSpec:
     """関数定義 AST ノードを FunctionSpec IR に変換する。"""
     # 関数名ノードを取得（言語差異を吸収）
@@ -1378,7 +1398,7 @@ def _map_function_to_spec(
         )
     else:
         name_node = fn_node.child_by_field_name("name")
-    name = extract_node_text(name_node).strip() if name_node is not None else "anonymous"
+    name = name_override or (extract_node_text(name_node).strip() if name_node is not None else "anonymous")
 
     # 本体ノードを取得（言語差異を吸収）
     if profile.function_body_access == "script_block_body":
@@ -1394,20 +1414,49 @@ def _map_function_to_spec(
     else:
         body_node = fn_node.child_by_field_name("body")
     scope = f"関数 `{name}`"
-    ir_nodes = (
-        _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin, warnings, scope)
-        if body_node is not None
-        else []
-    )
+    if body_node is None:
+        ir_nodes = []
+    elif body_node.type in {"block", "statement_block", "script_block_body"}:
+        ir_nodes = _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin, warnings, scope)
+    else:
+        ir_nodes = [ReturnNode(kind="ReturnNode", value_text=normalize_whitespace(extract_node_text(body_node)))]
 
     return FunctionSpec(
         name=name,
         body=tuple(ir_nodes),
-        description=_get_function_description(fn_node, plugin),
+        description=_get_function_description(description_node or fn_node, plugin),
         params=plugin.param_extractor(fn_node),
         return_type=plugin.return_type_extractor(fn_node),
         is_async=_is_async_function(fn_node),
     )
+
+
+def _extract_all_functions(
+    root_node: Node,
+    plugin: "LanguagePlugin",
+    direct_stmt_map: _DirectStmtMap,
+    warnings: list[str] | None = None,
+) -> tuple[FunctionSpec, ...]:
+    """トップレベルの通常関数と、プラグイン定義の追加関数候補を抽出する。"""
+    profile = plugin.profile
+    results: list[FunctionSpec] = []
+    for child in _get_top_level_nodes(root_node, profile):
+        if child.type == profile.function_node_type:
+            results.append(_map_function_to_spec(child, profile, direct_stmt_map, plugin, warnings))
+        if plugin.extra_function_extractor is not None:
+            for name, fn_node, description_node in plugin.extra_function_extractor(child):
+                results.append(
+                    _map_function_to_spec(
+                        fn_node,
+                        profile,
+                        direct_stmt_map,
+                        plugin,
+                        warnings,
+                        name_override=name,
+                        description_node=description_node,
+                    )
+                )
+    return tuple(results)
 
 
 # ---------------------------------------------------------------------------
@@ -1631,9 +1680,6 @@ def map_source_to_module_spec(
         module_variables=_extract_all_module_variables(root_node, plugin, warnings),
         type_definitions=_extract_all_type_definitions(root_node, plugin),
         class_definitions=_extract_all_class_definitions(root_node, plugin, direct_stmt_map, warnings),
-        functions=tuple(
-            _map_function_to_spec(fn_node, profile, direct_stmt_map, plugin, warnings)
-            for fn_node in _find_top_level_functions(root_node, profile)
-        ),
+        functions=_extract_all_functions(root_node, plugin, direct_stmt_map, warnings),
         extraction_warnings=tuple(dict.fromkeys(warnings)),
     )

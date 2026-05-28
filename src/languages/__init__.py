@@ -100,6 +100,11 @@ class LanguagePlugin:
     # 使用例: TypeScript（switch_statement）、Python（match_statement）
     switch_extractor: Optional[Callable[[Node, Callable[[list[Node]], list[IRNode]]], Optional[SwitchNode]]] = None
 
+    # 通常の function_node_type 以外からトップレベル関数を抽出するフック。
+    # 戻り値: (関数名, 関数本体ノード, 説明コメント探索用ノード) のタプル。
+    # 使用例: TypeScript の `const fn = (...) => ...`。
+    extra_function_extractor: Optional[Callable[[Node], tuple[tuple[str, Node, Node], ...]]] = None
+
 
 def discover_plugins() -> dict[str, LanguagePlugin]:
     """

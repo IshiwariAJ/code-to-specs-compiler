@@ -173,6 +173,23 @@ def ts_module_var_warning(node: Node) -> Optional[str]:
 # 型定義抽出
 # ---------------------------------------------------------------------------
 
+def extract_ts_arrow_functions(node: Node) -> tuple[tuple[str, Node, Node], ...]:
+    """TypeScript の `const name = (...) => ...` をトップレベル関数候補として返す。"""
+    if node.type != "lexical_declaration":
+        return ()
+
+    results: list[tuple[str, Node, Node]] = []
+    for declarator in node.named_children:
+        if declarator.type != "variable_declarator":
+            continue
+        name_node = declarator.child_by_field_name("name")
+        value_node = declarator.child_by_field_name("value")
+        if name_node is None or value_node is None or value_node.type != "arrow_function":
+            continue
+        results.append((extract_node_text(name_node).strip(), value_node, node))
+    return tuple(results)
+
+
 def extract_ts_type_definition(node: Node) -> Optional[TypeDefinitionSpec]:
     """
     TypeScript の type_alias_declaration / interface_declaration から
@@ -350,6 +367,6 @@ PLUGIN = LanguagePlugin(
     class_extractor=lambda _: None,  # TypeScript クラスは将来対応
     param_extractor=extract_ts_params,
     return_type_extractor=extract_ts_return_type,
-    module_var_warning_extractor=ts_module_var_warning,
     switch_extractor=extract_ts_switch,
+    extra_function_extractor=extract_ts_arrow_functions,
 )

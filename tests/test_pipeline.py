@@ -94,6 +94,12 @@ class TestTypeScriptPipeline:
         result = compile_to_spec(_TS_SOURCE, "test", ".tsx")
         assert "calculateBenefit" in result
 
+    def test_arrow_function_is_rendered_as_function(self):
+        src = "const arrowBenefit = (value: number): number => value + 1;\n"
+        result = compile_to_spec(src, "test", ".ts")
+        assert "arrowBenefit" in result
+        assert "value + 1" in result
+
 
 # ---------------------------------------------------------------------------
 # Python パイプラインのテスト
@@ -422,6 +428,20 @@ class TestPowerShellE2E:
     def test_output_contains_else_default_case(self):
         result = compile_to_spec(_PS_SOURCE, "test", ".ps1")
         assert "上記のいずれにも該当しない場合" in result
+
+    def test_output_contains_switch_node(self):
+        src = (
+            "function Get-StatusScore {\n"
+            "  param([string]$Status)\n"
+            "  switch ($Status) {\n"
+            '    "ACTIVE" { $total += 10 }\n'
+            "    default { $total += 0 }\n"
+            "  }\n"
+            "}\n"
+        )
+        result = compile_to_spec(src, "test", ".ps1")
+        assert "switch" in result
+        assert '"ACTIVE"' in result
 
     def test_ps_same_structural_markers_as_typescript(self):
         """PowerShell と TypeScript が同一の構造マーカーを出力することを確認（Universal IR の実証）"""
