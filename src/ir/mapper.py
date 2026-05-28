@@ -21,6 +21,7 @@ from .node_utils import extract_node_text, normalize_whitespace, strip_outer_par
 from .profiles import LanguageProfile
 from .types import (
     CaseNode,
+    CatchNode,
     ClassSpec,
     ConditionBlock,
     DataTransformation,
@@ -627,15 +628,23 @@ def _iter_catch_clauses(try_node: Node) -> list[Node]:
 
 
 def _extract_catch_var(catch_node: Node) -> str:
-    """Extract catch variable text across TypeScript, Python, Java and PowerShell."""
+    """
+    catch / except ブロックの変数バインディングのみを返す。
+
+    返すのは `catch (e)` の `e` や `except X as e:` の `e` のみ。
+    Python の例外型（`except ValueError:` の `ValueError`）は変数ではないため返さない。
+    """
+    # TypeScript: catch (error) → parameter フィールド
     parameter = catch_node.child_by_field_name("parameter")
     if parameter is not None:
         return extract_node_text(parameter).strip()
 
+    # Python: except X as e → as_pattern_target（エイリアス変数のみを返す）
     alias = _first_named_descendant_of_type(catch_node, "as_pattern_target")
     if alias is not None:
         return extract_node_text(alias).strip()
 
+    # Java: catch (ExceptionType e) → catch_formal_parameter / formal_parameter
     for param_type in ("catch_formal_parameter", "formal_parameter"):
         param = next((c for c in catch_node.named_children if c.type == param_type), None)
         if param is not None:
@@ -644,9 +653,9 @@ def _extract_catch_var(catch_node: Node) -> str:
                 return extract_node_text(name).strip()
             return _last_identifier_text(param)
 
-    value = catch_node.child_by_field_name("value")
-    if value is not None:
-        return extract_node_text(value).strip()
+    # "value" フィールドは意図的に除外する。
+    # Python の except_clause における "value" は例外型（ValueError 等）であり、
+    # 変数バインディングではないため catch_var に含めてはならない。
 
     return ""
 
@@ -671,16 +680,21 @@ def _map_try_to_ir(
     )
 
     catch_clauses = _iter_catch_clauses(try_node)
-    catch_node = catch_clauses[0] if catch_clauses else None
-    catch_body_node = _first_try_body_node(catch_node) if catch_node is not None else None
-    catch_body = _extract_case_body_ir_nodes(
-        catch_body_node,
-        profile,
-        direct_stmt_map,
-        plugin,
-        warnings,
-        scope,
-    )
+    catch_blocks: list[CatchNode] = []
+    for catch_clause in catch_clauses:
+        catch_body_node = _first_try_body_node(catch_clause)
+        catch_body = _extract_case_body_ir_nodes(
+            catch_body_node,
+            profile,
+            direct_stmt_map,
+            plugin,
+            warnings,
+            scope,
+        )
+        catch_blocks.append(CatchNode(
+            body=catch_body,
+            catch_var=_extract_catch_var(catch_clause),
+        ))
 
     finalizer = try_node.child_by_field_name("finalizer")
     if finalizer is None:
@@ -698,14 +712,10 @@ def _map_try_to_ir(
         scope,
     )
 
-    if warnings is not None and len(catch_clauses) > 1:
-        warnings.append(f"{scope}: try_statement は最初の catch / except 節のみ仕様化しました")
-
     return TryCatchNode(
         kind="TryCatchNode",
         try_body=try_body,
-        catch_var=_extract_catch_var(catch_node) if catch_node is not None else "",
-        catch_body=catch_body,
+        catch_blocks=tuple(catch_blocks),
         finally_body=finally_body,
     )
 
@@ -1165,9 +1175,13 @@ def _map_statement_to_ir(
         def _extract_stmts(stmts: list[Node]) -> list[IRNode]:
             result: list[IRNode] = []
             for stmt in stmts:
+                if _is_no_op_statement(stmt):
+                    continue
                 ir = _map_statement_to_ir(stmt, profile, direct_stmt_map, plugin, warnings, scope)
                 if ir is not None:
                     result.append(ir)
+                elif warnings is not None:
+                    warnings.append(_format_unmapped_statement_warning(stmt, scope))
             return result
         ir_node = plugin.switch_extractor(statement_node, _extract_stmts)
 

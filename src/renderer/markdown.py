@@ -15,6 +15,7 @@ from dataclasses import replace as _dataclass_replace
 
 from src.ir.types import (
     CaseNode,
+    CatchNode,
     ClassFieldSpec,
     ClassSpec,
     ConditionBlock,
@@ -558,6 +559,14 @@ def _render_try_body_block(label: str, body: tuple[IRNode, ...]) -> list[str]:
     return lines
 
 
+def _render_catch_block(catch: CatchNode) -> list[str]:
+    """CatchNode 1つを Markdown 行リストに変換する。"""
+    catch_label = "catch ブロック"
+    if catch.catch_var:
+        catch_label += f" (`{catch.catch_var}`)"
+    return _render_try_body_block(catch_label, catch.body)
+
+
 def _render_try_catch_node(node: TryCatchNode, index: int) -> str:
     """TryCatchNode IR ノードを Markdown テキストに変換する。"""
     lines = [
@@ -572,11 +581,8 @@ def _render_try_catch_node(node: TryCatchNode, index: int) -> str:
 
     lines.extend(_render_try_body_block("try ブロック", node.try_body))
 
-    if node.catch_body or node.catch_var:
-        catch_label = "catch ブロック"
-        if node.catch_var:
-            catch_label += f" (`{node.catch_var}`)"
-        lines.extend(_render_try_body_block(catch_label, node.catch_body))
+    for catch in node.catch_blocks:
+        lines.extend(_render_catch_block(catch))
 
     if node.finally_body:
         lines.extend(_render_try_body_block("finally ブロック", node.finally_body))
@@ -774,8 +780,14 @@ def render_module_spec(spec: ModuleSpec) -> str:
                 sections.append("")
 
     # 関数セクション
+    # クラスメソッドの処理フロー詳細が既に出力されている場合は「関数なし」メッセージを省略する
+    has_rendered_method_details = any(
+        any(m.body for m in cls.methods)
+        for cls in spec.class_definitions
+    )
     if not spec.functions:
-        sections.append("*（トップレベル関数が検出されませんでした）*")
+        if not has_rendered_method_details:
+            sections.append("*（トップレベル関数が検出されませんでした）*")
     else:
         for func_spec in spec.functions:
             sections.append(_render_function_spec(func_spec))

@@ -322,10 +322,11 @@ class TestTryCatchNode:
             "}"
         )
         node = _ts_body(src)[0]
-        assert node.catch_var == "error"
-        assert isinstance(node.catch_body[0], SideEffect)
-        assert isinstance(node.catch_body[1], ReturnNode)
-        assert node.catch_body[1].action == "throw"
+        assert len(node.catch_blocks) == 1
+        assert node.catch_blocks[0].catch_var == "error"
+        assert isinstance(node.catch_blocks[0].body[0], SideEffect)
+        assert isinstance(node.catch_blocks[0].body[1], ReturnNode)
+        assert node.catch_blocks[0].body[1].action == "throw"
 
     def test_typescript_finally_body_is_extracted(self):
         src = (
@@ -350,9 +351,22 @@ class TestTryCatchNode:
         )
         node = _py_body(src)[0]
         assert isinstance(node, TryCatchNode)
-        assert node.catch_var == "error"
-        assert isinstance(node.catch_body[1], ReturnNode)
-        assert node.catch_body[1].action == "raise"
+        assert node.catch_blocks[0].catch_var == "error"
+        assert isinstance(node.catch_blocks[0].body[1], ReturnNode)
+        assert node.catch_blocks[0].body[1].action == "raise"
+
+    def test_python_except_type_only_has_empty_catch_var(self):
+        """except ValueError: は型のみで変数バインディングなし → catch_var は空文字。"""
+        src = (
+            "def f():\n"
+            "    try:\n"
+            "        x = work()\n"
+            "    except ValueError:\n"
+            "        pass\n"
+        )
+        node = _py_body(src)[0]
+        assert isinstance(node, TryCatchNode)
+        assert node.catch_blocks[0].catch_var == ""
 
     def test_powershell_try_catch_finally_is_extracted(self):
         src = (
@@ -365,7 +379,7 @@ class TestTryCatchNode:
         node = _ps_body(src)[0]
         assert isinstance(node, TryCatchNode)
         assert isinstance(node.try_body[0], DataTransformation)
-        assert isinstance(node.catch_body[0], SideEffect)
+        assert isinstance(node.catch_blocks[0].body[0], SideEffect)
         assert isinstance(node.finally_body[0], SideEffect)
 
 
@@ -2205,10 +2219,10 @@ class TestJavaTryCatchNode:
         )
         node = _java_class_body(src)[0]
         assert isinstance(node, TryCatchNode)
-        assert node.catch_var == "error"
+        assert node.catch_blocks[0].catch_var == "error"
         assert isinstance(node.try_body[0], DataTransformation)
-        assert isinstance(node.catch_body[0], SideEffect)
-        assert isinstance(node.catch_body[1], ReturnNode)
+        assert isinstance(node.catch_blocks[0].body[0], SideEffect)
+        assert isinstance(node.catch_blocks[0].body[1], ReturnNode)
         assert isinstance(node.finally_body[0], SideEffect)
 
 

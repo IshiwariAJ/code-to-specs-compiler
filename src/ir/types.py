@@ -242,12 +242,23 @@ class ReturnNode:
 
 
 @dataclass(frozen=True)
+class CatchNode:
+    """
+    1つの catch / except ブロック。
+
+    catch_var: `except X as e:` / `catch (e)` の変数バインディング（e のみ）。
+    例外型（ValueError 等）は将来の catch_type フィールドで対応予定。
+    """
+    body: tuple[IRNode, ...] = ()
+    catch_var: str = ""  # バインディング変数のみ（例外型は含まない）
+
+
+@dataclass(frozen=True)
 class TryCatchNode:
     """try / catch / finally block with recursively extracted IR bodies."""
     kind: Literal["TryCatchNode"]
     try_body: tuple[IRNode, ...]
-    catch_var: str = ""
-    catch_body: tuple[IRNode, ...] = ()
+    catch_blocks: tuple[CatchNode, ...] = ()  # 複数 catch/except に対応
     finally_body: tuple[IRNode, ...] = ()
     comment: str = ""
 

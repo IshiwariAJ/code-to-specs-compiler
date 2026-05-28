@@ -322,8 +322,11 @@ def extract_ts_switch(
         if case_node.type == "switch_case":
             value_node = case_node.child_by_field_name("value")
             condition = extract_node_text(value_node).strip() if value_node else ""
-            # body = value 以外の named_children（value_node の後のすべての文）
-            body_stmts = [c for c in case_node.named_children if c is not value_node]
+            # tree-sitter の Python バインディングは child_by_field_name のたびに
+            # 新しいラッパーオブジェクトを生成するため、`is` での同一性チェックは
+            # 使えない。start_byte で位置を比較して case 値ノードを除外する。
+            value_start = value_node.start_byte if value_node is not None else -1
+            body_stmts = [c for c in case_node.named_children if c.start_byte != value_start]
             cases.append(CaseNode(condition_text=condition, body=tuple(extract_stmts(body_stmts))))
         elif case_node.type == "switch_default":
             body_stmts = list(case_node.named_children)

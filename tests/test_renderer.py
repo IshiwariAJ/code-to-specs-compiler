@@ -8,6 +8,7 @@ renderer/markdown.py のユニットテスト
 """
 from src.ir.types import (
     CaseNode,
+    CatchNode,
     ClassFieldSpec,
     ClassSpec,
     ConditionBlock,
@@ -335,8 +336,10 @@ class TestRenderTryCatchNode:
         node = TryCatchNode(
             kind="TryCatchNode",
             try_body=(),
-            catch_var="error",
-            catch_body=(SideEffect(kind="SideEffect", description="log(error)"),),
+            catch_blocks=(CatchNode(
+                catch_var="error",
+                body=(SideEffect(kind="SideEffect", description="log(error)"),),
+            ),),
         )
         output = _render_single_node(node)
         assert "catch ブロック (`error`)" in output

@@ -666,10 +666,10 @@ class TestJavaE2E:
         result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
         assert "BenefitResult" in result
 
-    def test_no_top_level_functions_message(self):
-        """Java はトップレベル関数がないため、その旨が出力されることを確認する"""
+    def test_no_top_level_functions_message_suppressed_when_methods_present(self):
+        """クラスメソッドの処理フロー詳細がある場合は「トップレベル関数なし」メッセージを出さない。"""
         result = compile_to_spec(_JAVA_SOURCE, "sample", ".java")
-        assert "トップレベル関数が検出されませんでした" in result
+        assert "トップレベル関数が検出されませんでした" not in result
 
     def test_java_same_structural_markers_as_typescript(self):
         """Java と TypeScript が同一の構造マーカーを出力することを確認（Universal IR の実証）"""
