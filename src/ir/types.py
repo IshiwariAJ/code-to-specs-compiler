@@ -178,12 +178,12 @@ class ConditionBlock:
 @dataclass(frozen=True)
 class LoopNode:
     """
-    繰り返し処理: for...of（FOR_EACH）または古典的 for ループ（FOR_RANGE）
+    繰り返し処理: for...of（FOR_EACH）/ 古典的 for（FOR_RANGE）/ while（WHILE）/ do-while（DO_WHILE）
 
-    例: for (const item of collection) { ... }
+    WHILE / DO_WHILE では collection フィールドを条件式として流用し、iterator は空文字。
     """
     kind: Literal["Loop"]
-    loop_type: Literal["FOR_EACH", "FOR_RANGE"]
+    loop_type: Literal["FOR_EACH", "FOR_RANGE", "WHILE", "DO_WHILE"]
     collection: str           # イテレート対象の式または範囲の説明
     iterator: str             # イテレータ変数名
     body: tuple[IRNode, ...]  # ループ本体内の入れ子IRノード

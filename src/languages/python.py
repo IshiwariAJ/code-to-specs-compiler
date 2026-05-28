@@ -42,6 +42,8 @@ PYTHON_PROFILE = LanguageProfile(
     direct_statement_types=frozenset(),
     class_node_types=frozenset({"decorated_definition", "class_definition"}),
     function_docstring_in_body=True,
+    while_node_type="while_statement",
+    # Python に do-while は存在しない
 )
 
 

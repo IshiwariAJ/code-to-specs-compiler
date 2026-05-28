@@ -59,6 +59,8 @@ POWERSHELL_PROFILE = LanguageProfile(
     for_loop_flavor="always_foreach",    # mapper では参照されない（ps_for_loop_mapper フックを使用）
     direct_statement_types=frozenset({"pipeline"}),  # 代入・コマンド呼び出しはすべて pipeline
     class_node_types=frozenset(),        # PowerShell class は将来対応
+    while_node_type="while_statement",
+    do_while_node_type="do_statement",
     # 言語固有アクセス方法
     if_then_block_access="statement_block_child",
     function_name_access="function_name_child",

@@ -487,18 +487,30 @@ def _render_condition_block(node: ConditionBlock, index: int) -> str:
 
 def _render_loop_header(node: LoopNode, index: int) -> str:
     """LoopNode のヘッダー行（繰り返し処理の説明）を返す。"""
+    prefix = f"### {index}. 🔄 繰り返し処理" if index > 0 else "* 🔄 繰り返し処理"
+
     if node.loop_type == "FOR_EACH":
-        prefix = f"### {index}. 🔄 繰り返し処理" if index > 0 else "* 🔄 繰り返し処理"
         return (
             f"{prefix}\n"
             f"* `{node.collection}` の各要素（`{node.iterator}`）に対して以下をループ実行:"
         )
 
-    # FOR_RANGE
-    prefix = f"### {index}. 🔄 繰り返し処理" if index > 0 else "* 🔄 繰り返し処理"
+    if node.loop_type == "FOR_RANGE":
+        return (
+            f"{prefix}\n"
+            f"* `{node.collection}` の条件で `{node.iterator}` をカウントしながらループ実行:"
+        )
+
+    if node.loop_type == "WHILE":
+        return (
+            f"{prefix}（while）\n"
+            f"* `{node.collection}` の間、以下をループ実行:"
+        )
+
+    # DO_WHILE
     return (
-        f"{prefix}\n"
-        f"* `{node.collection}` の条件で `{node.iterator}` をカウントしながらループ実行:"
+        f"{prefix}（do-while）\n"
+        f"* まず実行し、`{node.collection}` の間はループを繰り返す:"
     )
 
 

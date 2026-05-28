@@ -41,6 +41,8 @@ TYPESCRIPT_PROFILE = LanguageProfile(
     for_loop_flavor="of_keyword",
     direct_statement_types=frozenset(),
     class_node_types=frozenset(),  # TypeScript クラスは将来対応
+    while_node_type="while_statement",
+    do_while_node_type="do_statement",
 )
 
 
@@ -102,21 +104,22 @@ def extract_ts_import_list(node: Node) -> list[ImportSpec]:
 # モジュール変数抽出
 # ---------------------------------------------------------------------------
 
+def _get_ts_declarator(node: Node):
+    """lexical_declaration から variable_declarator を返す。"""
+    return next(
+        (c for c in node.named_children if c.type == "variable_declarator"),
+        None,
+    )
+
+
 def extract_ts_module_variable(node: Node) -> Optional[ModuleVariableSpec]:
     """
     TypeScript トップレベルの lexical_declaration（const/let）から
     ModuleVariableSpec を生成する。
-    """
-    is_constant = any(
-        child.type == "const" or extract_node_text(child) == "const"
-        for child in node.children
-        if not child.is_named
-    )
 
-    declarator = next(
-        (c for c in node.named_children if c.type == "variable_declarator"),
-        None,
-    )
+    value が arrow_function の場合は None を返す（警告は module_var_warning_extractor が担う）。
+    """
+    declarator = _get_ts_declarator(node)
     if declarator is None:
         return None
 
@@ -125,6 +128,15 @@ def extract_ts_module_variable(node: Node) -> Optional[ModuleVariableSpec]:
 
     if name_node is None or value_node is None:
         return None
+
+    if value_node.type == "arrow_function":
+        return None
+
+    is_constant = any(
+        child.type == "const" or extract_node_text(child) == "const"
+        for child in node.children
+        if not child.is_named
+    )
 
     name = extract_node_text(name_node).strip()
     value_text = normalize_whitespace(extract_node_text(value_node))
@@ -135,6 +147,24 @@ def extract_ts_module_variable(node: Node) -> Optional[ModuleVariableSpec]:
         value_text=value_text,
         is_constant=is_constant,
     )
+
+
+def ts_module_var_warning(node: Node) -> Optional[str]:
+    """
+    value が arrow_function の lexical_declaration に対して警告文字列を返す。
+
+    extract_ts_module_variable が None を返したノードに対して mapper が呼び出す。
+    アロー関数以外の理由で None になった場合（構文エラー等）は None を返す。
+    """
+    declarator = _get_ts_declarator(node)
+    if declarator is None:
+        return None
+    value_node = declarator.child_by_field_name("value")
+    if value_node is None or value_node.type != "arrow_function":
+        return None
+    name_node = declarator.child_by_field_name("name")
+    name = extract_node_text(name_node).strip() if name_node is not None else "?"
+    return f"アロー関数 `{name}` は仕様化対象外です（関数として仕様化するには function 宣言への変換が必要）"
 
 
 # ---------------------------------------------------------------------------
@@ -269,4 +299,5 @@ PLUGIN = LanguagePlugin(
     class_extractor=lambda _: None,  # TypeScript クラスは将来対応
     param_extractor=extract_ts_params,
     return_type_extractor=extract_ts_return_type,
+    module_var_warning_extractor=ts_module_var_warning,
 )

@@ -808,6 +808,67 @@ def _map_for_range_to_loop(
 
 
 # ---------------------------------------------------------------------------
+# マッピング: while / do-while → LoopNode IR
+# ---------------------------------------------------------------------------
+
+
+def _map_while_to_loop(
+    while_node: Node,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
+    warnings: list[str] | None = None,
+    scope: str = "",
+) -> LoopNode:
+    """while 文を LoopNode IR（WHILE）に変換する。"""
+    condition_node = while_node.child_by_field_name("condition")
+    condition_text = strip_outer_parens(extract_node_text(condition_node)) if condition_node is not None else ""
+
+    body_node = while_node.child_by_field_name("body")
+    nested_body = (
+        _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin, warnings, scope)
+        if body_node is not None
+        else []
+    )
+
+    return LoopNode(
+        kind="Loop",
+        loop_type="WHILE",
+        collection=condition_text,
+        iterator="",
+        body=tuple(nested_body),
+    )
+
+
+def _map_do_while_to_loop(
+    do_node: Node,
+    profile: LanguageProfile,
+    direct_stmt_map: _DirectStmtMap,
+    plugin: "LanguagePlugin",
+    warnings: list[str] | None = None,
+    scope: str = "",
+) -> LoopNode:
+    """do-while 文を LoopNode IR（DO_WHILE）に変換する。"""
+    condition_node = do_node.child_by_field_name("condition")
+    condition_text = strip_outer_parens(extract_node_text(condition_node)) if condition_node is not None else ""
+
+    body_node = do_node.child_by_field_name("body")
+    nested_body = (
+        _extract_body_ir_nodes(body_node, profile, direct_stmt_map, plugin, warnings, scope)
+        if body_node is not None
+        else []
+    )
+
+    return LoopNode(
+        kind="Loop",
+        loop_type="DO_WHILE",
+        collection=condition_text,
+        iterator="",
+        body=tuple(nested_body),
+    )
+
+
+# ---------------------------------------------------------------------------
 # マッピング: expression_statement → DataTransformation / SideEffect IR
 # （TypeScript / Python 共通）
 # ---------------------------------------------------------------------------
@@ -1023,6 +1084,26 @@ def _map_statement_to_ir(
 
     elif profile.for_range_node_type and node_type == profile.for_range_node_type:
         ir_node = _map_for_range_to_loop(
+            statement_node,
+            profile,
+            direct_stmt_map,
+            plugin,
+            warnings,
+            scope,
+        )
+
+    elif profile.while_node_type and node_type == profile.while_node_type:
+        ir_node = _map_while_to_loop(
+            statement_node,
+            profile,
+            direct_stmt_map,
+            plugin,
+            warnings,
+            scope,
+        )
+
+    elif profile.do_while_node_type and node_type == profile.do_while_node_type:
+        ir_node = _map_do_while_to_loop(
             statement_node,
             profile,
             direct_stmt_map,
@@ -1272,7 +1353,7 @@ def _extract_all_imports(
 
 
 def _extract_all_module_variables(
-    root_node: Node, plugin: "LanguagePlugin"
+    root_node: Node, plugin: "LanguagePlugin", warnings: list[str]
 ) -> tuple[ModuleVariableSpec, ...]:
     """プログラムのトップレベルから変数・定数定義を収集して返す。"""
     results: list[ModuleVariableSpec] = []
@@ -1281,6 +1362,10 @@ def _extract_all_module_variables(
             spec = plugin.module_var_extractor(child)
             if spec is not None:
                 results.append(spec)
+            elif plugin.module_var_warning_extractor is not None:
+                warning = plugin.module_var_warning_extractor(child)
+                if warning is not None:
+                    warnings.append(warning)
     return tuple(results)
 
 
@@ -1469,7 +1554,7 @@ def map_source_to_module_spec(
         name=module_name,
         file_comment=_get_file_header_comment(root_node, profile),
         imports=_extract_all_imports(root_node, plugin),
-        module_variables=_extract_all_module_variables(root_node, plugin),
+        module_variables=_extract_all_module_variables(root_node, plugin, warnings),
         type_definitions=_extract_all_type_definitions(root_node, plugin),
         class_definitions=_extract_all_class_definitions(root_node, plugin, direct_stmt_map, warnings),
         functions=tuple(

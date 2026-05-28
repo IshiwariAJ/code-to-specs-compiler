@@ -421,6 +421,61 @@ class TestLoopNode:
         assert len(loop.body) == 1
         assert isinstance(loop.body[0], DataTransformation)
 
+    # --- while ループ ---
+
+    def test_typescript_while_is_while_type(self):
+        body = _ts_body("function f() { while (!ready) { poll(); } }")
+        loops = [n for n in body if isinstance(n, LoopNode)]
+        assert len(loops) == 1
+        assert loops[0].loop_type == "WHILE"
+
+    def test_typescript_while_condition_extracted(self):
+        body = _ts_body("function f() { while (queue.length > 0) { process(); } }")
+        loop = next(n for n in body if isinstance(n, LoopNode))
+        assert loop.collection == "queue.length > 0"
+
+    def test_typescript_while_outer_parens_stripped(self):
+        """condition フィールドが parenthesized_expression でも外側の括弧を除去する。"""
+        body = _ts_body("function f() { while (x > 0) { x--; } }")
+        loop = next(n for n in body if isinstance(n, LoopNode))
+        assert not loop.collection.startswith("(")
+
+    def test_typescript_while_body_extracted(self):
+        body = _ts_body("function f() { while (n > 0) { total += n; } }")
+        loop = next(n for n in body if isinstance(n, LoopNode))
+        assert len(loop.body) == 1
+        assert isinstance(loop.body[0], DataTransformation)
+
+    def test_python_while_is_while_type(self):
+        body = _py_body("def f():\n    while retries < MAX:\n        attempt()\n")
+        loops = [n for n in body if isinstance(n, LoopNode)]
+        assert len(loops) == 1
+        assert loops[0].loop_type == "WHILE"
+
+    def test_python_while_condition_extracted(self):
+        body = _py_body("def f():\n    while retries < MAX:\n        attempt()\n")
+        loop = next(n for n in body if isinstance(n, LoopNode))
+        assert loop.collection == "retries < MAX"
+
+    # --- do-while ループ（TypeScript）---
+
+    def test_typescript_do_while_is_do_while_type(self):
+        body = _ts_body("function f() { do { step(); } while (running); }")
+        loops = [n for n in body if isinstance(n, LoopNode)]
+        assert len(loops) == 1
+        assert loops[0].loop_type == "DO_WHILE"
+
+    def test_typescript_do_while_condition_extracted(self):
+        body = _ts_body("function f() { do { step(); } while (n > 0); }")
+        loop = next(n for n in body if isinstance(n, LoopNode))
+        assert loop.collection == "n > 0"
+
+    def test_typescript_do_while_body_extracted(self):
+        body = _ts_body("function f() { do { total += 1; } while (running); }")
+        loop = next(n for n in body if isinstance(n, LoopNode))
+        assert len(loop.body) == 1
+        assert isinstance(loop.body[0], DataTransformation)
+
 
 # ---------------------------------------------------------------------------
 # データ変換（DataTransformation）の検出
@@ -656,6 +711,37 @@ class TestModuleVariableSpec:
     def test_no_module_vars_returns_empty_tuple(self):
         spec = _ts_module("function f() {}")
         assert spec.module_variables == ()
+
+    # --- TypeScript アロー関数の誤分類防止 ---
+
+    def test_ts_arrow_function_not_in_module_variables(self):
+        """アロー関数は module_variables に含まれない。"""
+        spec = _ts_module("const greet = (name: string): string => name;\nfunction f() {}")
+        assert all(v.name != "greet" for v in spec.module_variables)
+
+    def test_ts_arrow_function_generates_warning(self):
+        """アロー関数は extraction_warnings に追加される。"""
+        spec = _ts_module("const greet = (name: string): string => name;\nfunction f() {}")
+        assert any("greet" in w for w in spec.extraction_warnings)
+
+    def test_ts_arrow_function_warning_mentions_function(self):
+        """警告メッセージに function 宣言への変換について言及する。"""
+        spec = _ts_module("const fn = (x: number) => x + 1;\nfunction f() {}")
+        warning = next(w for w in spec.extraction_warnings if "fn" in w)
+        assert "function" in warning
+
+    def test_ts_non_arrow_const_still_captured(self):
+        """通常の const はアロー関数修正後も module_variables に残る。"""
+        spec = _ts_module("const MAX = 100;\nconst greet = (x: string) => x;\nfunction f() {}")
+        assert any(v.name == "MAX" for v in spec.module_variables)
+        assert not any(v.name == "greet" for v in spec.module_variables)
+
+    def test_ts_multiline_arrow_function_not_captured(self):
+        """複数行のアロー関数も module_variables に含まれない。"""
+        src = "const process = (items: string[]): void => {\n  items.forEach(i => console.log(i));\n};\nfunction f() {}"
+        spec = _ts_module(src)
+        assert all(v.name != "process" for v in spec.module_variables)
+        assert any("process" in w for w in spec.extraction_warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -1038,6 +1124,34 @@ class TestGoLoopNode:
         assert len(loop.body) == 1
         assert isinstance(loop.body[0], DataTransformation)
         assert loop.body[0].operation == "ADD"
+
+    def test_go_while_style_for_is_while_type(self):
+        """Go の `for condition { }` は WHILE として検出される。"""
+        src = (
+            "package main\n"
+            "func f() {\n"
+            "  for queue.Len() > 0 {\n"
+            "    process()\n"
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        loops = [n for n in body if isinstance(n, LoopNode)]
+        assert len(loops) == 1
+        assert loops[0].loop_type == "WHILE"
+
+    def test_go_while_style_for_condition_extracted(self):
+        src = (
+            "package main\n"
+            "func f() {\n"
+            "  for n > 0 {\n"
+            "    n--\n"
+            "  }\n"
+            "}\n"
+        )
+        body = _go_body(src)
+        loop = next(n for n in body if isinstance(n, LoopNode))
+        assert loop.collection == "n > 0"
 
 
 class TestGoDataTransformation:

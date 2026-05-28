@@ -243,6 +243,32 @@ class TestRenderLoopNode:
         assert "total" in output
         assert "item.price" in output
 
+    def test_while_header_contains_while_label(self):
+        node = LoopNode(kind="Loop", loop_type="WHILE", collection="queue.length > 0", iterator="", body=())
+        output = _render_single_node(node)
+        assert "繰り返し処理（while）" in output
+
+    def test_while_condition_appears(self):
+        node = LoopNode(kind="Loop", loop_type="WHILE", collection="n > 0", iterator="", body=())
+        output = _render_single_node(node)
+        assert "n > 0" in output
+
+    def test_while_body_is_rendered(self):
+        nested = DataTransformation(kind="DataTransformation", target="n", operation="SUBTRACT", value="1")
+        node = LoopNode(kind="Loop", loop_type="WHILE", collection="n > 0", iterator="", body=(nested,))
+        output = _render_single_node(node)
+        assert "n" in output
+
+    def test_do_while_header_contains_do_while_label(self):
+        node = LoopNode(kind="Loop", loop_type="DO_WHILE", collection="running", iterator="", body=())
+        output = _render_single_node(node)
+        assert "繰り返し処理（do-while）" in output
+
+    def test_do_while_condition_appears(self):
+        node = LoopNode(kind="Loop", loop_type="DO_WHILE", collection="x > 0", iterator="", body=())
+        output = _render_single_node(node)
+        assert "x > 0" in output
+
 
 # ---------------------------------------------------------------------------
 # TryCatchNode のレンダリング

@@ -173,3 +173,11 @@ class LanguageProfile:
     # Python: True（`"""..."""` が body 先頭に置かれ、description として抽出済みのため body 反復時にスキップする）
     # それ以外: False
     function_docstring_in_body: bool = False
+
+    # while ループのノードタイプ（"" = 未対応）
+    # TypeScript / Python / Java / PowerShell: "while_statement"
+    while_node_type: str = ""
+
+    # do-while ループのノードタイプ（"" = 未対応）
+    # TypeScript / Java / PowerShell: "do_statement"（Python には do-while なし）
+    do_while_node_type: str = ""

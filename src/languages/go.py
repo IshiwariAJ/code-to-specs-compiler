@@ -352,7 +352,23 @@ def go_for_loop_mapper(
             body=tuple(nested_body),
         )
 
-    return None  # 無限ループ・while スタイルは対象外
+    # Go の `for condition { }` は while ループ相当（range_clause も for_clause もない）。
+    # condition は named field ではなく block 以外の named_child として現れる。
+    condition_node = next(
+        (c for c in for_node.named_children if c.type != "block"),
+        None,
+    )
+    if condition_node is not None:
+        condition_text = extract_node_text(condition_node).strip()
+        return LoopNode(
+            kind="Loop",
+            loop_type="WHILE",
+            collection=condition_text,
+            iterator="",
+            body=tuple(nested_body),
+        )
+
+    return None  # 無限ループ（`for { }`）はスコープ外
 
 
 # ---------------------------------------------------------------------------

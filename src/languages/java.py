@@ -63,6 +63,8 @@ JAVA_PROFILE = LanguageProfile(
     for_loop_flavor="always_foreach",  # mapper では参照されない（java_for_loop_mapper を使用）
     direct_statement_types=frozenset(),
     class_node_types=frozenset({"class_declaration"}),
+    while_node_type="while_statement",
+    do_while_node_type="do_statement",
 )
 
 

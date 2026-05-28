@@ -201,6 +201,7 @@ class TestEdgeCases:
             compile_to_spec("function f() {}", "test", ".js")
 
     def test_unmapped_statement_warning_is_rendered(self):
+        # while ループは対応済みのため警告ではなく仕様書に出力される
         src = (
             "function waitUntilReady() {\n"
             "  while (!ready) {\n"
@@ -209,9 +210,9 @@ class TestEdgeCases:
             "}\n"
         )
         result = compile_to_spec(src, "test", ".ts")
-        assert "抽出警告" in result
-        assert "while_statement" in result
-        assert "未対応のため仕様化されませんでした" in result
+        assert "繰り返し処理（while）" in result
+        assert "!ready" in result
+        assert "poll()" in result
 
 
 # ---------------------------------------------------------------------------
