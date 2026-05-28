@@ -31,16 +31,16 @@ Phase R10 ██████████ 完了    レビュー指摘対応（�
 
 ## 現在の検証状況
 
-**503件 全グリーン**（2026-05-28 時点）
+**521件 全グリーン**（2026-05-28 時点）
 
 | テストファイル | 件数 |
 |---|---|
-| `tests/test_mapper.py` | 254件 |
+| `tests/test_mapper.py` | 267件 |
 | `tests/test_renderer.py` | 125件 |
-| `tests/test_pipeline.py` | 85件 |
+| `tests/test_pipeline.py` | 90件 |
 | `tests/test_batch.py` | 39件 |
 
-直近の補強として、TypeScript `switch` の `case` 本体に含まれる未対応文（例: `break_statement`）が `extraction_warnings` に記録されることを回帰テストで固定した。
+直近の補強として、PowerShell の `$Script:Name = value` を `ModuleVariableSpec` として抽出し、抽出できないトップレベル `pipeline` を警告として残す回帰テストを追加した。
 
 ---
 

@@ -51,7 +51,7 @@ POWERSHELL_PROFILE = LanguageProfile(
     elif_structure="elseif_clauses",     # elseif_clauses コンテナ + else_clause
     lexical_declaration_types=frozenset(),
     import_node_types=frozenset(),       # using module 等は将来対応
-    module_var_node_types=frozenset(),   # スクリプトスコープ変数は将来対応
+    module_var_node_types=frozenset({"pipeline"}),  # $Scope:Name = value を抽出
     type_alias_node_type="",
     interface_node_type="",
     block_inner_node_type="statement_list",  # statement_block → statement_list → 文ノード
@@ -174,12 +174,77 @@ def extract_ps_imports(import_node: Node) -> list[ImportSpec]:
 
 
 # ---------------------------------------------------------------------------
-# モジュール変数抽出（MVP では未対応）
+# モジュール変数抽出: $Scope:Name = value
 # ---------------------------------------------------------------------------
 
 def extract_ps_module_variable(node: Node) -> Optional[ModuleVariableSpec]:
-    """PowerShell のスクリプトスコープ変数は将来対応。"""
-    return None
+    """
+    PowerShell のトップレベル pipeline から $Scope:Name = value 形式のスクリプト変数を抽出する。
+
+    例: $Script:MaxPoints = 1000 → ModuleVariableSpec(name="MaxPoints", value_text="1000")
+    スコープ修飾子のない変数（$plainVar）や複合代入（$Script:x += 1）は None を返す。
+    """
+    named = node.named_children
+    if not named or named[0].type != "assignment_expression":
+        return None
+
+    assign_node = named[0]
+    left_node = next(
+        (c for c in assign_node.named_children if c.type == "left_assignment_expression"),
+        None,
+    )
+    op_node = next(
+        (c for c in assign_node.named_children if c.type == "assignement_operator"),
+        None,
+    )
+    right_node = next(
+        (c for c in assign_node.named_children if c.type == "pipeline"),
+        None,
+    )
+
+    if left_node is None or right_node is None:
+        return None
+
+    left_text = extract_node_text(left_node).strip()  # e.g., "$Script:MaxPoints"
+
+    # $Script: スコープのみを対象とする（$Global:, $env: 等は除外）
+    colon_idx = left_text.find(":")
+    if colon_idx < 0:
+        return None
+    scope = left_text[1:colon_idx].lower()  # "$Script:..." → "script"
+    if scope != "script":
+        return None
+
+    name = left_text[colon_idx + 1:]
+    if not name:
+        return None
+
+    # 複合代入 (+=, -= 等) はモジュール変数定義ではなく更新なのでスキップ
+    op_text = extract_node_text(op_node).strip() if op_node is not None else "="
+    if op_text != "=":
+        return None
+
+    value_text = normalize_whitespace(extract_node_text(right_node))
+
+    return ModuleVariableSpec(
+        kind="ModuleVariableSpec",
+        name=name,
+        value_text=value_text,
+        is_constant=False,  # PowerShell に const キーワードはない
+    )
+
+
+def ps_module_var_warning(node: Node) -> Optional[str]:
+    """
+    extract_ps_module_variable が None を返したトップレベル pipeline を警告として返す。
+
+    $Script:Name = value として抽出できなかったトップレベル pipeline 文を
+    「未対応構文」として警告に記録する（サイレントドロップを防ぐ）。
+    """
+    snippet = normalize_whitespace(extract_node_text(node))
+    if len(snippet) > 120:
+        snippet = snippet[:117].rstrip() + "..."
+    return f"トップレベル: pipeline は未対応のため仕様化されませんでした: `{snippet}`"
 
 
 # ---------------------------------------------------------------------------
@@ -341,6 +406,7 @@ PLUGIN = LanguagePlugin(
     parse_source=parse_powershell_source,
     import_extractor=extract_ps_imports,
     module_var_extractor=extract_ps_module_variable,
+    module_var_warning_extractor=ps_module_var_warning,
     type_def_extractor=lambda _: None,
     class_extractor=lambda _: None,
     direct_statement_extractors=(

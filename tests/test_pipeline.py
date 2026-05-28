@@ -686,3 +686,46 @@ class TestJavaE2E:
         for marker in ["前提条件（ガード句）", "繰り返し処理", "条件分岐", "データ変換"]:
             assert marker in java_result, f"Java 出力に {marker} がない"
             assert marker in ts_result, f"TS 出力に {marker} がない"
+
+
+# ---------------------------------------------------------------------------
+# PowerShell $Script:* モジュール変数 E2E テスト
+# ---------------------------------------------------------------------------
+
+_PS_MODULE_VAR_SOURCE = (
+    "$Script:MaxPoints = 1000\n"
+    "$Script:PremiumThreshold = 100000\n"
+    "$Script:AuditCounter = 0\n"
+    "function Get-Benefit {\n"
+    "    param([string]$Status)\n"
+    "    if (-not $Status) { throw 'required' }\n"
+    "    return $Script:MaxPoints\n"
+    "}\n"
+)
+
+
+class TestPowerShellModuleVariableE2E:
+    """PowerShell $Script:Name = value がモジュール変数として仕様書に出力されることを E2E で確認する"""
+
+    def test_module_variable_section_appears(self):
+        result = compile_to_spec(_PS_MODULE_VAR_SOURCE, "test", ".ps1")
+        assert "モジュール定数・変数" in result
+
+    def test_module_variable_name_in_output(self):
+        result = compile_to_spec(_PS_MODULE_VAR_SOURCE, "test", ".ps1")
+        assert "MaxPoints" in result
+
+    def test_module_variable_value_in_output(self):
+        result = compile_to_spec(_PS_MODULE_VAR_SOURCE, "test", ".ps1")
+        assert "1000" in result
+
+    def test_multiple_module_variables_in_output(self):
+        result = compile_to_spec(_PS_MODULE_VAR_SOURCE, "test", ".ps1")
+        assert "PremiumThreshold" in result
+        assert "AuditCounter" in result
+
+    def test_no_pipeline_warning_for_script_scope_variable(self):
+        """$Script:* 変数がトップレベル pipeline 警告として出力されないことを確認する。"""
+        result = compile_to_spec(_PS_MODULE_VAR_SOURCE, "test", ".ps1")
+        assert "MaxPoints" not in result.split("## ⚠️")[1] if "## ⚠️" in result else True
+        assert "pipeline は未対応" not in result

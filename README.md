@@ -5,7 +5,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Tests](https://img.shields.io/badge/tests-503%20passing-brightgreen.svg)](#テスト--testing)
+[![Tests](https://img.shields.io/badge/tests-521%20passing-brightgreen.svg)](#テスト--testing)
 
 ---
 
@@ -23,7 +23,7 @@ LLMは使用しません。[tree-sitter](https://tree-sitter.github.io/tree-sitt
 | 🎯 **ハルシネーションなし** | AIを使わないため、コード由来でない説明を付加しない |
 | 🔒 **完全ローカル実行** | 機密コード・社内コードも外部送信なしで安全に処理 |
 | 🌐 **多言語・統一フォーマット** | TypeScript / Python / Go / PowerShell / Java から同一Markdownフォーマットで出力 |
-| ⚡ **高速・決定論的** | 同じ入力からは常に同じ出力（503テスト全グリーン） |
+| ⚡ **高速・決定論的** | 同じ入力からは常に同じ出力（521テスト全グリーン） |
 | ⚠️ **未抽出構文を明示** | 現在のIRで仕様化できない関数内構文は抽出警告として出力 |
 
 ---
@@ -216,11 +216,11 @@ pytest
 
 | テストファイル | 件数 | 内容 |
 |---|---|---|
-| `tests/test_mapper.py` | 254件 | AST → IR マッピングのユニットテスト |
+| `tests/test_mapper.py` | 267件 | AST → IR マッピングのユニットテスト |
 | `tests/test_renderer.py` | 125件 | IR → Markdown レンダリングのユニットテスト |
-| `tests/test_pipeline.py` | 85件 | E2E 統合テスト（TypeScript / Python / Go / PowerShell / Java） |
+| `tests/test_pipeline.py` | 90件 | E2E 統合テスト（TypeScript / Python / Go / PowerShell / Java） |
 | `tests/test_batch.py` | 39件 | バッチコンパイル機能のテスト |
-| **合計** | **503件** | **全グリーン** |
+| **合計** | **521件** | **全グリーン** |
 
 ---
 
@@ -246,7 +246,7 @@ It uses no LLMs — only compiler technology ([tree-sitter](https://tree-sitter.
 | 🎯 **Zero hallucination** | No AI means the spec only contains what the code actually says |
 | 🔒 **Fully local** | Confidential code never leaves your machine |
 | 🌐 **Multi-language, unified format** | TypeScript, Python, Go, PowerShell, and Java all produce the same Markdown structure |
-| ⚡ **Fast & deterministic** | Same input always produces the same output (503 tests passing) |
+| ⚡ **Fast & deterministic** | Same input always produces the same output (521 tests passing) |
 
 ---
 
@@ -357,15 +357,15 @@ pip install pytest
 pytest
 ```
 
-503 tests, all green.
+521 tests, all green.
 
 | File | Count | Scope |
 |---|---|---|
-| `tests/test_mapper.py` | 254 | AST → IR mapping unit tests |
+| `tests/test_mapper.py` | 267 | AST → IR mapping unit tests |
 | `tests/test_renderer.py` | 125 | IR → Markdown rendering unit tests |
-| `tests/test_pipeline.py` | 85 | E2E integration tests (TypeScript / Python / Go / PowerShell / Java) |
+| `tests/test_pipeline.py` | 90 | E2E integration tests (TypeScript / Python / Go / PowerShell / Java) |
 | `tests/test_batch.py` | 39 | Batch compile feature tests |
-| **Total** | **503** | **All green** |
+| **Total** | **521** | **All green** |
 
 ---
 

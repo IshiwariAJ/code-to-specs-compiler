@@ -2442,3 +2442,98 @@ class TestAwaitedExpressions:
         body = _py_body(src)
         assert isinstance(body[0], DataTransformation)
         assert body[0].is_awaited is True
+
+
+# ---------------------------------------------------------------------------
+# PowerShell モジュール変数（$Scope:Name = value）
+# ---------------------------------------------------------------------------
+
+
+class TestPowerShellModuleVariables:
+    """$Script:Name = value 形式のスクリプトスコープ変数を ModuleVariableSpec として抽出できることを確認する"""
+
+    def test_script_scope_variable_is_extracted(self):
+        src = "$Script:MaxPoints = 1000\nfunction Get-Foo {}\n"
+        spec = _ps_module(src)
+        assert len(spec.module_variables) == 1
+
+    def test_script_scope_variable_name_strips_scope(self):
+        src = "$Script:MaxPoints = 1000\nfunction Get-Foo {}\n"
+        spec = _ps_module(src)
+        assert spec.module_variables[0].name == "MaxPoints"
+
+    def test_script_scope_variable_value_text(self):
+        src = "$Script:MaxPoints = 1000\nfunction Get-Foo {}\n"
+        spec = _ps_module(src)
+        assert spec.module_variables[0].value_text == "1000"
+
+    def test_script_scope_variable_is_not_constant(self):
+        src = "$Script:MaxPoints = 1000\nfunction Get-Foo {}\n"
+        spec = _ps_module(src)
+        assert spec.module_variables[0].is_constant is False
+
+    def test_multiple_script_scope_variables(self):
+        src = (
+            "$Script:MaxPoints = 1000\n"
+            "$Script:Threshold = 100000\n"
+            "$Script:Counter = 0\n"
+            "function Get-Foo {}\n"
+        )
+        spec = _ps_module(src)
+        assert len(spec.module_variables) == 3
+        names = [v.name for v in spec.module_variables]
+        assert "MaxPoints" in names
+        assert "Threshold" in names
+        assert "Counter" in names
+
+    def test_script_scope_variable_no_top_level_pipeline_warning(self):
+        """$Script:* 変数はトップレベル pipeline 警告として出てはならない。"""
+        src = "$Script:MaxPoints = 1000\nfunction Get-Foo {}\n"
+        spec = _ps_module(src)
+        assert not any("MaxPoints" in w for w in spec.extraction_warnings)
+        assert not any("pipeline" in w for w in spec.extraction_warnings)
+
+    def test_unscoped_variable_returns_none_from_extractor(self):
+        """スコープ修飾子のない $plainVar = value はモジュール変数として抽出されない。"""
+        src = "$plainVar = 42\nfunction Get-Foo {}\n"
+        spec = _ps_module(src)
+        assert spec.module_variables == ()
+
+    def test_compound_assignment_is_not_module_variable(self):
+        """$Script:x += 1 は更新であり初期化ではないのでモジュール変数として抽出しない。"""
+        src = "$Script:Counter += 1\nfunction Get-Foo {}\n"
+        spec = _ps_module(src)
+        assert spec.module_variables == ()
+
+    def test_module_variable_is_correct_type(self):
+        src = "$Script:Limit = 500\nfunction Get-Foo {}\n"
+        spec = _ps_module(src)
+        assert isinstance(spec.module_variables[0], ModuleVariableSpec)
+
+    # --- P2b: $Script: スコープのみを許可（$Global:, $env: 等は除外）---
+
+    def test_global_scope_variable_is_not_extracted(self):
+        """$Global:Name は $Script: スコープでないのでモジュール変数として抽出しない。"""
+        src = "$Global:MaxSize = 100\nfunction Get-Foo {}\n"
+        spec = _ps_module(src)
+        assert spec.module_variables == ()
+
+    def test_env_scope_variable_is_not_extracted(self):
+        """$env:PATH は環境変数スコープなのでモジュール変数として抽出しない。"""
+        src = "$env:PATH = 'x'\nfunction Get-Foo {}\n"
+        spec = _ps_module(src)
+        assert spec.module_variables == ()
+
+    # --- P2a: 抽出できなかったトップレベル pipeline は警告として記録する ---
+
+    def test_unscoped_assignment_generates_warning(self):
+        """スコープ修飾子のない $plainVar = 42 はモジュール変数でなく警告として記録される。"""
+        src = "$plainVar = 42\nfunction Get-Foo {}\n"
+        spec = _ps_module(src)
+        assert any("pipeline" in w for w in spec.extraction_warnings)
+
+    def test_non_script_scope_assignment_generates_warning(self):
+        """$Global:X = 1 は $Script: でないため警告として記録される。"""
+        src = "$Global:X = 1\nfunction Get-Foo {}\n"
+        spec = _ps_module(src)
+        assert any("pipeline" in w for w in spec.extraction_warnings)
